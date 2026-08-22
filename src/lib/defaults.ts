@@ -1,4 +1,4 @@
-import { DemoConfig } from "./types";
+import { DemoConfig, DEFAULT_API_VERSION } from "./types";
 
 // A starter intent payload. Mirrors the shop's create-intent body but trimmed to
 // the essentials. The user can edit this freely — add flow_id, billing_data,
@@ -30,6 +30,7 @@ export const DEFAULT_INTENT_PAYLOAD = {
 
 export const DEFAULT_CONFIG: DemoConfig = {
   environment: "sandbox",
+  apiVersion: DEFAULT_API_VERSION,
   publicApiKey: "",
   secretApiKey: "",
   integrationType: "sdk",

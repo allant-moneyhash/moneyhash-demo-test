@@ -4,17 +4,28 @@
 
 export type Environment = "sandbox" | "production";
 
-// The environments map to MoneyHash base URLs. Sandbox is the safe default.
-export const ENVIRONMENTS: Record<Environment, { label: string; baseURL: string }> = {
+// Each environment is just a host. The API version is chosen separately, so the
+// base URL is built from host + version at request time.
+export const ENVIRONMENTS: Record<Environment, { label: string; host: string }> = {
   sandbox: {
     label: "Sandbox (staging)",
-    baseURL: "https://staging-web.moneyhash.io/api/v1.1",
+    host: "https://staging-web.moneyhash.io",
   },
   production: {
     label: "Production (live money — careful)",
-    baseURL: "https://web.moneyhash.io/api/v1.1",
+    host: "https://web.moneyhash.io",
   },
 };
+
+// Selectable API versions. Defaults to the current documented version.
+export const API_VERSIONS = ["v1.1", "v1.2", "v1.3", "v1.4"] as const;
+export type ApiVersion = (typeof API_VERSIONS)[number];
+export const DEFAULT_API_VERSION: ApiVersion = "v1.4";
+
+// Build the full base URL from environment + version.
+export function buildBaseURL(env: Environment, version: ApiVersion): string {
+  return `${ENVIRONMENTS[env].host}/api/${version}`;
+}
 
 // How the checkout is rendered once the intent exists.
 export type IntegrationType = "sdk" | "iframe" | "redirect";
@@ -29,6 +40,7 @@ export const INTEGRATION_TYPES: Record<IntegrationType, string> = {
 // and sent to our own relay per-request; never persisted, never in the URL.
 export interface DemoConfig {
   environment: Environment;
+  apiVersion: ApiVersion;
   publicApiKey: string;
   secretApiKey: string;
   integrationType: IntegrationType;

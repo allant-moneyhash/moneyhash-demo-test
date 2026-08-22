@@ -1,6 +1,6 @@
 "use client";
 
-import { DemoConfig, ENVIRONMENTS, INTEGRATION_TYPES, Environment, IntegrationType } from "@/lib/types";
+import { DemoConfig, ENVIRONMENTS, INTEGRATION_TYPES, Environment, IntegrationType, API_VERSIONS, ApiVersion, buildBaseURL } from "@/lib/types";
 import { QUICK_CURRENCIES } from "@/lib/defaults";
 
 const labelStyle: React.CSSProperties = {
@@ -104,6 +104,27 @@ export default function ConfigPanel({
             Production moves real money. Use sandbox for demos and testing.
           </p>
         )}
+      </div>
+
+      {/* API version */}
+      <div>
+        <label style={labelStyle} htmlFor="ver">
+          API version
+        </label>
+        <select
+          id="ver"
+          value={config.apiVersion}
+          onChange={(e) =>
+            onChange({ apiVersion: e.target.value as ApiVersion })
+          }
+          style={{ ...inputStyle, cursor: "pointer" }}
+        >
+          {API_VERSIONS.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
         <p
           className="mono"
           style={{
@@ -113,7 +134,7 @@ export default function ConfigPanel({
             wordBreak: "break-all",
           }}
         >
-          {ENVIRONMENTS[config.environment].baseURL}
+          {buildBaseURL(config.environment, config.apiVersion)}
         </p>
       </div>
 

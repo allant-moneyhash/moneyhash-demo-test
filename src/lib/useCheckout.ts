@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { DemoConfig, ENVIRONMENTS, LogEntry, LogKind, Outcome } from "./types";
+import { DemoConfig, buildBaseURL, LogEntry, LogKind, Outcome } from "./types";
 
 // We import the headless SDK dynamically inside the browser only, so it never
 // runs on the server during build.
@@ -90,7 +90,7 @@ export function useCheckout() {
       reset();
       setBusy(true);
 
-      const baseURL = ENVIRONMENTS[config.environment].baseURL;
+      const baseURL = buildBaseURL(config.environment, config.apiVersion);
 
       // 1) Parse the payload the user configured.
       let body: Record<string, unknown>;
