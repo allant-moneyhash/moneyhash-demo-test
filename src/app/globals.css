@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/*
+  Design direction: "instrument panel".
+  The tool has two sides. The LEFT (shop/checkout) is calm and paper-like so the
+  demo looks like a real store. The RIGHT (inspector) is a dark control surface
+  where the API machinery is on display. One accent — a signal cyan — marks
+  "live activity" and primary actions. Type pairs a humanist sans for reading
+  with a monospace for all the machine data.
+*/
+
+:root {
+  --paper: #f7f5f0;
+  --paper-edge: #e9e5db;
+  --ink: #14171c;
+  --ink-soft: #1c2027;
+  --ink-line: #2b313b;
+  --ink-text: #c9d1dc;
+  --ink-dim: #7b8695;
+
+  --text: #22262d;
+  --text-soft: #5a626e;
+
+  --signal: #12b5b0;
+  --signal-deep: #0c8f8b;
+  --ok: #2f9e6f;
+  --warn: #d98324;
+  --bad: #d1495b;
+
+  --radius: 10px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--sans);
+  color: var(--text);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
