@@ -357,6 +357,56 @@ export default function ConfigPanel({
         </div>
       </div>
 
+      {/* Method timing toggle — only meaningful for the SDK path */}
+      {config.integrationType === "sdk" && (
+        <div>
+          <label style={labelStyle}>When to fetch payment methods</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(
+              [
+                ["methods-first", "Methods first"],
+                ["intent-first", "Intent first"],
+              ] as const
+            ).map(([val, lbl]) => {
+              const active = config.methodTiming === val;
+              return (
+                <button
+                  key={val}
+                  onClick={() => onChange({ methodTiming: val })}
+                  style={{
+                    flex: 1,
+                    padding: "8px 10px",
+                    fontSize: 12,
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    border: active
+                      ? "1px solid var(--signal)"
+                      : "1px solid var(--paper-edge)",
+                    background: active ? "rgba(18,181,176,0.08)" : "#fff",
+                    color: active ? "var(--signal-deep)" : "var(--text-soft)",
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  {lbl}
+                </button>
+              );
+            })}
+          </div>
+          <p
+            style={{
+              margin: "6px 0 0",
+              fontSize: 11,
+              color: "var(--text-soft)",
+              lineHeight: 1.4,
+            }}
+          >
+            {config.methodTiming === "methods-first"
+              ? "Fetch methods from your keys + currency first, create the intent when paying."
+              : "Create the intent first, then fetch the methods available for it."}
+          </p>
+        </div>
+      )}
+
       {/* Quick currency */}
       <div>
         <label style={labelStyle}>Currency (quick set)</label>

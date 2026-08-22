@@ -4,6 +4,18 @@ import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { PRODUCTS, QUICK_CURRENCIES } from "@/lib/defaults";
 
+const qtyBtnStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  borderRadius: 7,
+  border: "1px solid var(--paper-edge)",
+  background: "#fff",
+  cursor: "pointer",
+  fontSize: 16,
+  lineHeight: 1,
+  color: "var(--text)",
+};
+
 export default function Storefront() {
   const router = useRouter();
   const {
@@ -106,76 +118,120 @@ export default function Storefront() {
               gap: 20,
             }}
           >
-            {PRODUCTS.map((p) => (
-              <div
-                key={p.id}
-                style={{
-                  border: "1px solid var(--paper-edge)",
-                  borderRadius: 12,
-                  background: "#fff",
-                  overflow: "hidden",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
+            {PRODUCTS.map((p) => {
+              const inCart = cart.find((i) => i.product.id === p.id);
+              return (
                 <div
+                  key={p.id}
                   style={{
-                    height: 140,
-                    background:
-                      "linear-gradient(135deg, #eef1f0 0%, #e3e8ee 100%)",
+                    border: "1px solid var(--paper-edge)",
+                    borderRadius: 12,
+                    background: "#fff",
+                    overflow: "hidden",
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "var(--text-soft)",
-                    fontSize: 40,
+                    flexDirection: "column",
                   }}
                 >
-                  {p.name.charAt(0)}
-                </div>
-                <div style={{ padding: 16, display: "flex", flexDirection: "column", flex: 1 }}>
-                  <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 600 }}>
-                    {p.name}
-                  </h3>
-                  <p
+                  <div
                     style={{
-                      margin: "0 0 14px",
-                      fontSize: 12.5,
-                      color: "var(--text-soft)",
-                      lineHeight: 1.4,
+                      height: 140,
+                      background: p.tint,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 52,
+                    }}
+                  >
+                    {p.emoji}
+                  </div>
+                  <div
+                    style={{
+                      padding: 16,
+                      display: "flex",
+                      flexDirection: "column",
                       flex: 1,
                     }}
                   >
-                    {p.blurb}
-                  </p>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <span className="mono" style={{ fontSize: 14, fontWeight: 600 }}>
-                      {fmt(p.price[currency] ?? 0)}
-                    </span>
-                    <button
-                      onClick={() => addToCart(p)}
+                    <h3
+                      style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 600 }}
+                    >
+                      {p.name}
+                    </h3>
+                    <p
                       style={{
-                        padding: "7px 14px",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        borderRadius: 8,
-                        border: "none",
-                        background: "var(--signal)",
-                        color: "#fff",
-                        cursor: "pointer",
+                        margin: "0 0 14px",
+                        fontSize: 12.5,
+                        color: "var(--text-soft)",
+                        lineHeight: 1.4,
+                        flex: 1,
                       }}
                     >
-                      Add
-                    </button>
+                      {p.blurb}
+                    </p>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <span
+                        className="mono"
+                        style={{ fontSize: 14, fontWeight: 600 }}
+                      >
+                        {fmt(p.price[currency] ?? 0)}
+                      </span>
+                      {inCart ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <button
+                            onClick={() => removeFromCart(p.id)}
+                            aria-label={`Remove one ${p.name}`}
+                            style={qtyBtnStyle}
+                          >
+                            −
+                          </button>
+                          <span
+                            className="mono"
+                            style={{ minWidth: 16, textAlign: "center" }}
+                          >
+                            {inCart.quantity}
+                          </span>
+                          <button
+                            onClick={() => addToCart(p)}
+                            aria-label={`Add one ${p.name}`}
+                            style={qtyBtnStyle}
+                          >
+                            +
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => addToCart(p)}
+                          style={{
+                            padding: "7px 14px",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            borderRadius: 8,
+                            border: "none",
+                            background: "var(--signal)",
+                            color: "#fff",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Add
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

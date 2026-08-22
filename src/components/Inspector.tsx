@@ -57,6 +57,20 @@ function LogRow({ entry }: { entry: LogEntry }) {
         >
           {entry.title}
         </span>
+        {(entry.status || entry.durationMs !== undefined) && (
+          <span
+            className="mono"
+            style={{
+              fontSize: 10.5,
+              color: "var(--ink-dim)",
+              flexShrink: 0,
+            }}
+          >
+            {entry.status ? entry.status : ""}
+            {entry.status && entry.durationMs !== undefined ? " · " : ""}
+            {entry.durationMs !== undefined ? `${entry.durationMs}ms` : ""}
+          </span>
+        )}
         {hasBody && (
           <span
             className="mono"

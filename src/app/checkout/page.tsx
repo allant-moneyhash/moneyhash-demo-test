@@ -11,7 +11,8 @@ import Inspector from "@/components/Inspector";
 export default function CheckoutPage() {
   const router = useRouter();
   const { cart, currency, config, setConfig } = useStore();
-  const { log, busy, outcome, start, reset } = useCheckout();
+  const { log, busy, outcome, methods, awaitingMethod, selectMethod, start, reset } =
+    useCheckout();
   const [payloadEdited, setPayloadEdited] = useState(false);
 
   // Build the base payload from the cart, then let the scenario shape it.
@@ -243,6 +244,67 @@ export default function CheckoutPage() {
             }}
           >
             {outcomeMeta[outcome].text}
+          </div>
+        )}
+
+        {awaitingMethod && methods.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                marginBottom: 10,
+              }}
+            >
+              Choose a payment method
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {methods.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => selectMethod(m.id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "12px 14px",
+                    border: "1px solid var(--paper-edge)",
+                    borderRadius: 10,
+                    background: "#fff",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  {m.icons && m.icons[0] && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.icons[0]}
+                      alt=""
+                      style={{ height: 22, width: "auto" }}
+                    />
+                  )}
+                  {m.title || m.id}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {awaitingMethod && methods.length === 0 && (
+          <div
+            style={{
+              padding: "12px 16px",
+              borderRadius: 9,
+              marginBottom: 18,
+              border: "1px solid var(--warn)",
+              color: "var(--warn)",
+              fontSize: 13,
+            }}
+          >
+            No payment methods came back for this currency/account. Check that
+            providers are connected in your sandbox for this currency.
           </div>
         )}
 

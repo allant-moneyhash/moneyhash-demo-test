@@ -44,6 +44,10 @@ export interface DemoConfig {
   publicApiKey: string;
   secretApiKey: string;
   integrationType: IntegrationType;
+  // For the SDK path: whether to fetch methods before creating the intent
+  // ("methods-first") or create the intent first then fetch its methods
+  // ("intent-first"). Both are valid MoneyHash flows.
+  methodTiming: "methods-first" | "intent-first";
   // Selected scenario id and the values for any fields it reveals.
   scenarioId: string;
   scenarioValues: Record<string, string>;
@@ -73,6 +77,9 @@ export interface LogEntry {
   title: string;
   // Pretty-printed JSON or plain text shown in the expandable body.
   body?: string;
+  // Optional status label (e.g. "200", "400", "OK") and duration in ms.
+  status?: string;
+  durationMs?: number;
   timestamp: number;
 }
 
@@ -88,6 +95,8 @@ export interface Product {
   description: string;
   // price per currency code
   price: Record<string, number>;
+  emoji: string;
+  tint: string;
 }
 
 export interface CartItem {

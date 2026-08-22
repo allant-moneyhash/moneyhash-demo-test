@@ -33,6 +33,7 @@ export const DEFAULT_CONFIG: DemoConfig = {
   publicApiKey: "",
   secretApiKey: "",
   integrationType: "sdk",
+  methodTiming: "methods-first",
   scenarioId: "basic-card",
   scenarioValues: {},
   flowId: "",
@@ -50,6 +51,7 @@ export const DEFAULT_CONFIG: DemoConfig = {
 export const QUICK_CURRENCIES = ["AED", "SAR", "EGP", "USD", "EUR", "GBP"];
 
 // Three dummy products for the storefront. Prices are per-currency.
+// emoji + tint give each a simple, dependency-free visual.
 export const PRODUCTS: Product[] = [
   {
     id: "tote",
@@ -57,6 +59,8 @@ export const PRODUCTS: Product[] = [
     blurb: "Everyday carry, heavyweight cotton",
     description: "A durable heavyweight cotton tote bag for everyday use.",
     price: { AED: 55, SAR: 55, EGP: 450, USD: 15, EUR: 14, GBP: 12 },
+    emoji: "👜",
+    tint: "#e8e0d2",
   },
   {
     id: "headphones",
@@ -64,6 +68,8 @@ export const PRODUCTS: Product[] = [
     blurb: "Over-ear, 30-hour battery",
     description: "Over-ear wireless headphones with 30-hour battery life.",
     price: { AED: 320, SAR: 320, EGP: 2600, USD: 89, EUR: 82, GBP: 72 },
+    emoji: "🎧",
+    tint: "#d6e2e6",
   },
   {
     id: "notebook",
@@ -71,5 +77,7 @@ export const PRODUCTS: Product[] = [
     blurb: "A5, 192 pages, lay-flat binding",
     description: "An A5 dotted notebook with 192 pages and lay-flat binding.",
     price: { AED: 40, SAR: 40, EGP: 320, USD: 11, EUR: 10, GBP: 9 },
+    emoji: "📓",
+    tint: "#e6dde6",
   },
 ];
