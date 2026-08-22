@@ -1,165 +1,280 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { DemoConfig } from "@/lib/types";
-import { DEFAULT_CONFIG } from "@/lib/defaults";
-import { useCheckout } from "@/lib/useCheckout";
-import ConfigPanel from "@/components/ConfigPanel";
-import Inspector from "@/components/Inspector";
+import { useRouter } from "next/navigation";
+import { useStore } from "@/lib/store";
+import { PRODUCTS, QUICK_CURRENCIES } from "@/lib/defaults";
 
-export default function Home() {
-  const [config, setConfig] = useState<DemoConfig>(DEFAULT_CONFIG);
-  const { log, busy, outcome, start, reset } = useCheckout();
+export default function Storefront() {
+  const router = useRouter();
+  const {
+    currency,
+    setCurrency,
+    cart,
+    addToCart,
+    removeFromCart,
+    cartCount,
+  } = useStore();
 
-  const payloadError = useMemo(() => {
-    try {
-      JSON.parse(config.intentPayload);
-      return null;
-    } catch (e) {
-      return e instanceof Error ? `Invalid JSON: ${e.message}` : "Invalid JSON";
-    }
-  }, [config.intentPayload]);
-
-  function patch(p: Partial<DemoConfig>) {
-    setConfig((c) => ({ ...c, ...p }));
-  }
-
-  const outcomeMeta = {
-    success: { text: "Payment successful", color: "var(--ok)" },
-    failed: { text: "Payment failed", color: "var(--bad)" },
-    cancelled: { text: "Payment cancelled", color: "var(--warn)" },
-    pending: { text: "Pending…", color: "var(--warn)" },
-  } as const;
+  const fmt = (n: number) => `${currency} ${n.toLocaleString()}`;
+  const total = cart.reduce(
+    (sum, i) => sum + (i.product.price[currency] ?? 0) * i.quantity,
+    0,
+  );
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "340px 1fr 420px",
-        height: "100vh",
-        width: "100vw",
-        overflow: "hidden",
-      }}
-    >
-      {/* LEFT: config */}
-      <aside
+    <div style={{ minHeight: "100vh", background: "var(--paper)" }}>
+      {/* Header */}
+      <header
         style={{
-          borderRight: "1px solid var(--paper-edge)",
-          overflowY: "auto",
-          padding: "18px 18px 40px",
-          background: "var(--paper)",
+          borderBottom: "1px solid var(--paper-edge)",
+          padding: "16px 32px",
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          background: "#fff",
         }}
       >
-        <div style={{ marginBottom: 18 }}>
-          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
-            MoneyHash Demo
+        <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.01em" }}>
+          The Demo Shop
+        </span>
+        <span
+          className="mono"
+          style={{ fontSize: 11, color: "var(--text-soft)" }}
+        >
+          powered by MoneyHash
+        </span>
+
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          {QUICK_CURRENCIES.map((cur) => {
+            const active = currency === cur;
+            return (
+              <button
+                key={cur}
+                onClick={() => setCurrency(cur)}
+                className="mono"
+                style={{
+                  padding: "6px 11px",
+                  fontSize: 12,
+                  borderRadius: 7,
+                  cursor: "pointer",
+                  border: active
+                    ? "1px solid var(--signal)"
+                    : "1px solid var(--paper-edge)",
+                  background: active ? "rgba(18,181,176,0.08)" : "#fff",
+                  color: active ? "var(--signal-deep)" : "var(--text-soft)",
+                  fontWeight: active ? 600 : 400,
+                }}
+              >
+                {cur}
+              </button>
+            );
+          })}
+        </div>
+      </header>
+
+      <div
+        style={{
+          maxWidth: 1100,
+          margin: "0 auto",
+          padding: "40px 32px",
+          display: "grid",
+          gridTemplateColumns: "1fr 320px",
+          gap: 40,
+          alignItems: "start",
+        }}
+      >
+        {/* Products */}
+        <div>
+          <h1 style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 700 }}>
+            Shop the collection
           </h1>
           <p
             style={{
-              margin: "4px 0 0",
-              fontSize: 12,
+              margin: "0 0 28px",
               color: "var(--text-soft)",
-              lineHeight: 1.4,
-            }}
-          >
-            Configure a checkout and watch every call it makes.
-          </p>
-        </div>
-        <ConfigPanel
-          config={config}
-          onChange={patch}
-          onStart={() => start(config)}
-          busy={busy}
-          payloadError={payloadError}
-        />
-      </aside>
-
-      {/* MIDDLE: checkout stage */}
-      <main
-        style={{
-          overflowY: "auto",
-          padding: "28px 32px",
-          background: "#fff",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 18,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Checkout</h2>
-          {(log.length > 0 || outcome) && (
-            <button
-              onClick={reset}
-              style={{
-                fontSize: 12,
-                padding: "6px 12px",
-                borderRadius: 7,
-                border: "1px solid var(--paper-edge)",
-                background: "#fff",
-                cursor: "pointer",
-                color: "var(--text-soft)",
-              }}
-            >
-              Reset
-            </button>
-          )}
-        </div>
-
-        {outcome && (
-          <div
-            style={{
-              padding: "12px 16px",
-              borderRadius: 9,
-              marginBottom: 18,
-              background: "#fff",
-              border: `1px solid ${outcomeMeta[outcome].color}`,
-              color: outcomeMeta[outcome].color,
-              fontWeight: 600,
               fontSize: 14,
             }}
           >
-            {outcomeMeta[outcome].text}
-          </div>
-        )}
+            Pick a few items and head to checkout to see the payment flow in
+            action.
+          </p>
 
-        {/* The SDK / embed renders its form into this container. */}
-        <div
-          id="mh-embed"
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 20,
+            }}
+          >
+            {PRODUCTS.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  border: "1px solid var(--paper-edge)",
+                  borderRadius: 12,
+                  background: "#fff",
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <div
+                  style={{
+                    height: 140,
+                    background:
+                      "linear-gradient(135deg, #eef1f0 0%, #e3e8ee 100%)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--text-soft)",
+                    fontSize: 40,
+                  }}
+                >
+                  {p.name.charAt(0)}
+                </div>
+                <div style={{ padding: 16, display: "flex", flexDirection: "column", flex: 1 }}>
+                  <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 600 }}>
+                    {p.name}
+                  </h3>
+                  <p
+                    style={{
+                      margin: "0 0 14px",
+                      fontSize: 12.5,
+                      color: "var(--text-soft)",
+                      lineHeight: 1.4,
+                      flex: 1,
+                    }}
+                  >
+                    {p.blurb}
+                  </p>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <span className="mono" style={{ fontSize: 14, fontWeight: 600 }}>
+                      {fmt(p.price[currency] ?? 0)}
+                    </span>
+                    <button
+                      onClick={() => addToCart(p)}
+                      style={{
+                        padding: "7px 14px",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        borderRadius: 8,
+                        border: "none",
+                        background: "var(--signal)",
+                        color: "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Cart */}
+        <aside
           style={{
-            flex: 1,
-            minHeight: 360,
+            border: "1px solid var(--paper-edge)",
             borderRadius: 12,
-            border: "1px dashed var(--paper-edge)",
-            display: log.length === 0 ? "flex" : "block",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 8,
+            background: "#fff",
+            padding: 20,
+            position: "sticky",
+            top: 40,
           }}
         >
-          {log.length === 0 && (
-            <p
-              style={{
-                color: "var(--text-soft)",
-                fontSize: 13,
-                textAlign: "center",
-                maxWidth: 320,
-                lineHeight: 1.5,
-              }}
-            >
-              The checkout form will appear here once you start a payment.
-            </p>
-          )}
-        </div>
-      </main>
+          <h2 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600 }}>
+            Your cart {cartCount > 0 && `(${cartCount})`}
+          </h2>
 
-      {/* RIGHT: inspector */}
-      <Inspector entries={log} />
+          {cart.length === 0 ? (
+            <p style={{ color: "var(--text-soft)", fontSize: 13 }}>
+              Nothing here yet. Add a product to get started.
+            </p>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {cart.map((i) => (
+                  <div
+                    key={i.product.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      fontSize: 13,
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 500 }}>{i.product.name}</div>
+                      <div
+                        className="mono"
+                        style={{ fontSize: 11.5, color: "var(--text-soft)" }}
+                      >
+                        {fmt(i.product.price[currency] ?? 0)} × {i.quantity}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeFromCart(i.product.id)}
+                      style={{
+                        border: "1px solid var(--paper-edge)",
+                        background: "#fff",
+                        borderRadius: 6,
+                        width: 26,
+                        height: 26,
+                        cursor: "pointer",
+                        color: "var(--text-soft)",
+                      }}
+                      aria-label={`Remove one ${i.product.name}`}
+                    >
+                      −
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div
+                style={{
+                  borderTop: "1px solid var(--paper-edge)",
+                  marginTop: 16,
+                  paddingTop: 14,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontWeight: 700,
+                  fontSize: 15,
+                }}
+              >
+                <span>Total</span>
+                <span className="mono">{fmt(total)}</span>
+              </div>
+
+              <button
+                onClick={() => router.push("/checkout")}
+                style={{
+                  marginTop: 18,
+                  width: "100%",
+                  padding: "12px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  borderRadius: 9,
+                  border: "none",
+                  background: "var(--ink)",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Proceed to checkout
+              </button>
+            </>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { LogEntry, LogKind } from "@/lib/types";
 const KIND_META: Record<LogKind, { label: string; color: string }> = {
   request: { label: "REQUEST", color: "var(--signal)" },
   response: { label: "RESPONSE", color: "var(--ok)" },
+  "sdk-call": { label: "SDK CALL", color: "#4a9de0" },
   "sdk-state": { label: "SDK STATE", color: "#9a86e0" },
   info: { label: "INFO", color: "var(--ink-dim)" },
   error: { label: "ERROR", color: "var(--bad)" },

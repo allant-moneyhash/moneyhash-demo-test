@@ -44,13 +44,28 @@ export interface DemoConfig {
   publicApiKey: string;
   secretApiKey: string;
   integrationType: IntegrationType;
+  // Selected scenario id and the values for any fields it reveals.
+  scenarioId: string;
+  scenarioValues: Record<string, string>;
+  // Optional flow id, auto-added to the payload when set.
+  flowId: string;
+  // Webhook URL MoneyHash will fire events to (e.g. a webhook.site inbox).
+  webhookUrl: string;
+  // The full family of redirect URLs MoneyHash supports on intent creation,
+  // per https://docs.moneyhash.io/docs/redirects
+  successUrl: string;
+  failUrl: string;
+  pendingUrl: string; // pending_external_action_redirect_url
+  timeExpiredUrl: string;
+  closedUrl: string;
+  backUrl: string; // extra field used by the shop
   // Raw JSON the user edits — becomes the create-intent request body.
   // Mirrors the shop's `...extraConfig` pattern: whatever you put here is sent.
   intentPayload: string;
 }
 
 // A single entry in the inspector panel (right side).
-export type LogKind = "request" | "response" | "sdk-state" | "info" | "error";
+export type LogKind = "request" | "response" | "sdk-call" | "sdk-state" | "info" | "error";
 
 export interface LogEntry {
   id: string;
@@ -63,3 +78,19 @@ export interface LogEntry {
 
 // The final outcome the left panel routes on.
 export type Outcome = "success" | "failed" | "cancelled" | "pending" | null;
+
+// Storefront product. Prices are keyed by currency for simple multi-currency
+// display (a demo relabel, not live FX).
+export interface Product {
+  id: string;
+  name: string;
+  blurb: string;
+  description: string;
+  // price per currency code
+  price: Record<string, number>;
+}
+
+export interface CartItem {
+  product: Product;
+  quantity: number;
+}

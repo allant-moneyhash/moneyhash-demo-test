@@ -1,4 +1,4 @@
-import { DemoConfig, DEFAULT_API_VERSION } from "./types";
+import { DemoConfig, DEFAULT_API_VERSION, Product } from "./types";
 
 // A starter intent payload. Mirrors the shop's create-intent body but trimmed to
 // the essentials. The user can edit this freely — add flow_id, billing_data,
@@ -6,6 +6,7 @@ import { DemoConfig, DEFAULT_API_VERSION } from "./types";
 export const DEFAULT_INTENT_PAYLOAD = {
   amount: 50,
   amount_currency: "AED",
+  operation: "purchase",
   // Uncomment / add fields as needed for your scenario:
   // flow_id: "<your-flow-id>",
   billing_data: {
@@ -19,9 +20,7 @@ export const DEFAULT_INTENT_PAYLOAD = {
       name: "Demo product",
       amount: 50,
       quantity: 1,
-      type: "digital",
-      category: "demo",
-      reference_id: "demo-1",
+      description: "A demo product for testing the checkout",
     },
   ],
   // Keeps the SDK embed compact when we render it ourselves.
@@ -34,8 +33,43 @@ export const DEFAULT_CONFIG: DemoConfig = {
   publicApiKey: "",
   secretApiKey: "",
   integrationType: "sdk",
+  scenarioId: "basic-card",
+  scenarioValues: {},
+  flowId: "",
+  webhookUrl: "",
+  successUrl: "",
+  failUrl: "",
+  pendingUrl: "",
+  timeExpiredUrl: "",
+  closedUrl: "",
+  backUrl: "",
   intentPayload: JSON.stringify(DEFAULT_INTENT_PAYLOAD, null, 2),
 };
 
-// Common currencies to offer as quick picks (writes into the payload).
+// Common currencies to offer as quick picks.
 export const QUICK_CURRENCIES = ["AED", "SAR", "EGP", "USD", "EUR", "GBP"];
+
+// Three dummy products for the storefront. Prices are per-currency.
+export const PRODUCTS: Product[] = [
+  {
+    id: "tote",
+    name: "Canvas Tote Bag",
+    blurb: "Everyday carry, heavyweight cotton",
+    description: "A durable heavyweight cotton tote bag for everyday use.",
+    price: { AED: 55, SAR: 55, EGP: 450, USD: 15, EUR: 14, GBP: 12 },
+  },
+  {
+    id: "headphones",
+    name: "Wireless Headphones",
+    blurb: "Over-ear, 30-hour battery",
+    description: "Over-ear wireless headphones with 30-hour battery life.",
+    price: { AED: 320, SAR: 320, EGP: 2600, USD: 89, EUR: 82, GBP: 72 },
+  },
+  {
+    id: "notebook",
+    name: "Dotted Notebook",
+    blurb: "A5, 192 pages, lay-flat binding",
+    description: "An A5 dotted notebook with 192 pages and lay-flat binding.",
+    price: { AED: 40, SAR: 40, EGP: 320, USD: 11, EUR: 10, GBP: 9 },
+  },
+];

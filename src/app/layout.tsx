@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { StoreProvider } from "@/lib/store";
 
 export const metadata: Metadata = {
   title: "MoneyHash Demo Tool",
-  description: "Configure a checkout and watch every API call it makes.",
+  description: "A storefront demo with a transparent, inspectable checkout.",
 };
 
 export default function RootLayout({
@@ -13,7 +14,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <StoreProvider>{children}</StoreProvider>
+      </body>
     </html>
   );
 }

@@ -2,6 +2,7 @@
 
 import { DemoConfig, ENVIRONMENTS, INTEGRATION_TYPES, Environment, IntegrationType, API_VERSIONS, ApiVersion, buildBaseURL } from "@/lib/types";
 import { QUICK_CURRENCIES } from "@/lib/defaults";
+import { SCENARIOS, getScenario } from "@/lib/scenarios";
 
 const labelStyle: React.CSSProperties = {
   display: "block",
@@ -27,12 +28,14 @@ const inputStyle: React.CSSProperties = {
 export default function ConfigPanel({
   config,
   onChange,
+  onScenarioChange,
   onStart,
   busy,
   payloadError,
 }: {
   config: DemoConfig;
   onChange: (patch: Partial<DemoConfig>) => void;
+  onScenarioChange: (scenarioId: string) => void;
   onStart: () => void;
   busy: boolean;
   payloadError: string | null;
@@ -179,6 +182,148 @@ export default function ConfigPanel({
           Used once per request through our own relay to create the intent. Never
           stored, never shared in a link.
         </p>
+      </div>
+
+      {/* Scenario picker */}
+      <div>
+        <label style={labelStyle} htmlFor="scenario">
+          Scenario
+        </label>
+        <select
+          id="scenario"
+          value={config.scenarioId}
+          onChange={(e) => onScenarioChange(e.target.value)}
+          style={{ ...inputStyle, cursor: "pointer", fontFamily: "var(--sans)" }}
+        >
+          {SCENARIOS.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+              {s.ready ? "" : " (preview)"}
+            </option>
+          ))}
+        </select>
+        <p
+          style={{
+            margin: "6px 0 0",
+            fontSize: 11,
+            color: "var(--text-soft)",
+            lineHeight: 1.4,
+          }}
+        >
+          {getScenario(config.scenarioId).blurb}
+        </p>
+
+        {/* Fields revealed by the selected scenario */}
+        {getScenario(config.scenarioId).fields.map((f) => (
+          <div key={f.key} style={{ marginTop: 10 }}>
+            <label
+              htmlFor={`sc-${f.key}`}
+              style={{
+                display: "block",
+                fontSize: 11,
+                color: "var(--text-soft)",
+                marginBottom: 4,
+              }}
+            >
+              {f.label}
+            </label>
+            <input
+              id={`sc-${f.key}`}
+              style={inputStyle}
+              value={config.scenarioValues[f.key] ?? ""}
+              onChange={(e) =>
+                onChange({
+                  scenarioValues: {
+                    ...config.scenarioValues,
+                    [f.key]: e.target.value,
+                  },
+                })
+              }
+              placeholder={f.placeholder}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* Flow ID */}
+      <div>
+        <label style={labelStyle} htmlFor="flowId">
+          Flow ID
+        </label>
+        <input
+          id="flowId"
+          style={inputStyle}
+          value={config.flowId}
+          onChange={(e) => onChange({ flowId: e.target.value })}
+          placeholder="optional — added to payload as flow_id"
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </div>
+
+      {/* Webhook + redirects */}
+      <div>
+        <label style={labelStyle} htmlFor="webhook">
+          Webhook URL
+        </label>
+        <input
+          id="webhook"
+          style={inputStyle}
+          value={config.webhookUrl}
+          onChange={(e) => onChange({ webhookUrl: e.target.value })}
+          placeholder="https://webhook.site/your-id"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <p
+          style={{
+            margin: "6px 0 0",
+            fontSize: 11,
+            color: "var(--text-soft)",
+            lineHeight: 1.4,
+          }}
+        >
+          MoneyHash fires events here. A webhook.site inbox works well for demos.
+        </p>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <span style={labelStyle}>Redirect URLs</span>
+        {(
+          [
+            ["successUrl", "Successful"],
+            ["failUrl", "Failed"],
+            ["pendingUrl", "Pending external action"],
+            ["timeExpiredUrl", "Time expired"],
+            ["closedUrl", "Closed"],
+            ["backUrl", "Back"],
+          ] as const
+        ).map(([key, label]) => (
+          <div key={key}>
+            <label
+              htmlFor={key}
+              style={{
+                display: "block",
+                fontSize: 11,
+                color: "var(--text-soft)",
+                marginBottom: 4,
+              }}
+            >
+              {label}
+            </label>
+            <input
+              id={key}
+              style={inputStyle}
+              value={config[key]}
+              onChange={(e) => onChange({ [key]: e.target.value })}
+              placeholder="https://…"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        ))}
       </div>
 
       {/* Integration type */}

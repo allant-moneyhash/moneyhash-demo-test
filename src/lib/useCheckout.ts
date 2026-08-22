@@ -3,16 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { DemoConfig, buildBaseURL, LogEntry, LogKind, Outcome } from "./types";
 
-// We import the headless SDK dynamically inside the browser only, so it never
-// runs on the server during build.
-type AnyMoneyHash = {
-  getMethods: (o: Record<string, unknown>) => Promise<unknown>;
-  proceedWith: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
-  renderForm: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
-  renderUrl: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
-  getIntentDetails: (id: string) => Promise<IntentDetailsLike>;
-};
-
+// Minimal shape of the SDK instance we use.
 interface IntentDetailsLike {
   intent?: { id?: string; status?: string };
   state?: string;
@@ -22,36 +13,55 @@ interface IntentDetailsLike {
   [k: string]: unknown;
 }
 
+interface AnyMoneyHash {
+  getMethods: (o: Record<string, unknown>) => Promise<unknown>;
+  renderForm: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
+  getIntentDetails: (id: string) => Promise<IntentDetailsLike>;
+}
+
 let counter = 0;
 const nextId = () => `${Date.now()}-${counter++}`;
+
+// Redact obvious secrets before logging any object.
+function redact(obj: unknown): unknown {
+  if (!obj || typeof obj !== "object") return obj;
+  const clone: Record<string, unknown> = Array.isArray(obj)
+    ? ([...(obj as unknown[])] as unknown as Record<string, unknown>)
+    : { ...(obj as Record<string, unknown>) };
+  for (const k of Object.keys(clone)) {
+    if (/key|secret|token|cvv|password/i.test(k) && typeof clone[k] === "string") {
+      const v = clone[k] as string;
+      clone[k] = v.length > 8 ? `${v.slice(0, 4)}…${v.slice(-2)}` : "•••";
+    } else if (clone[k] && typeof clone[k] === "object") {
+      clone[k] = redact(clone[k]);
+    }
+  }
+  return clone;
+}
 
 export function useCheckout() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
-  const mhRef = useRef<AnyMoneyHash | null>(null);
   const intentIdRef = useRef<string | null>(null);
 
-  const add = useCallback(
-    (kind: LogKind, title: string, body?: unknown) => {
-      setLog((prev) => [
-        ...prev,
-        {
-          id: nextId(),
-          kind,
-          title,
-          body:
-            body === undefined
-              ? undefined
-              : typeof body === "string"
-                ? body
-                : JSON.stringify(body, null, 2),
-          timestamp: Date.now(),
-        },
-      ]);
-    },
-    [],
-  );
+  const add = useCallback((kind: LogKind, title: string, body?: unknown) => {
+    setLog((prev) => [
+      ...prev,
+      {
+        id: nextId(),
+        kind,
+        title,
+        body:
+          body === undefined
+            ? undefined
+            : typeof body === "string"
+              ? body
+              : JSON.stringify(redact(body), null, 2),
+        timestamp: Date.now(),
+      },
+    ]);
+  }, []);
 
   const reset = useCallback(() => {
     setLog([]);
@@ -59,12 +69,10 @@ export function useCheckout() {
     intentIdRef.current = null;
   }, []);
 
-  // Map an SDK intent "state" onto our success/failed/cancelled outcome.
   const applyState = useCallback(
     (details: IntentDetailsLike) => {
       const state = details.state;
       add("sdk-state", `SDK state: ${state ?? "unknown"}`, details);
-
       switch (state) {
         case "INTENT_PROCESSED":
           setOutcome("success");
@@ -92,7 +100,7 @@ export function useCheckout() {
 
       const baseURL = buildBaseURL(config.environment, config.apiVersion);
 
-      // 1) Parse the payload the user configured.
+      // 1) Parse the payload.
       let body: Record<string, unknown>;
       try {
         body = JSON.parse(config.intentPayload);
@@ -102,13 +110,27 @@ export function useCheckout() {
         return;
       }
 
-      // 2) Create the intent through our relay (keeps secret key off the page).
+      // Merge dedicated fields (raw JSON wins if already set).
+      const setIfAbsent = (key: string, value: string) => {
+        if (value && body[key] === undefined) body[key] = value;
+      };
+      setIfAbsent("flow_id", config.flowId);
+      setIfAbsent("webhook_url", config.webhookUrl);
+      setIfAbsent("successful_redirect_url", config.successUrl);
+      setIfAbsent("failed_redirect_url", config.failUrl);
+      setIfAbsent("pending_external_action_redirect_url", config.pendingUrl);
+      setIfAbsent("time_expired_redirect_url", config.timeExpiredUrl);
+      setIfAbsent("closed_redirect_url", config.closedUrl);
+      setIfAbsent("back_url", config.backUrl);
+
+      // 2) Create the intent through the relay.
       add("request", "Create intent → POST /payments/intent/", {
         endpoint: `${baseURL}/payments/intent/`,
         body,
       });
 
       let intentId: string;
+      let embedUrl: string | undefined;
       try {
         const res = await fetch("/api/create-intent", {
           method: "POST",
@@ -120,25 +142,30 @@ export function useCheckout() {
           }),
         });
         const json = await res.json();
-
         if (!res.ok) {
           add("error", "Create intent failed.", json);
           setBusy(false);
           return;
         }
-
         add("response", "Intent created.", json.data);
-        intentId =
-          json.data?.id ||
-          json.data?.data?.id ||
-          json.data?.intent?.id;
+
+        // MoneyHash wraps the payload; the intent lives under data.data most of
+        // the time, but check the common locations to be safe.
+        const d = json.data ?? {};
+        const inner = d.data ?? d;
+        intentId = inner?.id || d?.id || inner?.intent?.id;
+
+        // The embed URL for iframe/redirect integration comes back on the
+        // intent response. Check the documented and wrapped locations.
+        embedUrl =
+          inner?.embed_url ||
+          d?.embed_url ||
+          inner?.embedUrl ||
+          inner?.state_details?.embed_url ||
+          inner?.stateDetails?.embed_url;
 
         if (!intentId) {
-          add(
-            "error",
-            "Could not find an intent id in the response. Check the payload shape.",
-            json.data,
-          );
+          add("error", "No intent id found in the response.", json.data);
           setBusy(false);
           return;
         }
@@ -149,7 +176,46 @@ export function useCheckout() {
         return;
       }
 
-      // 3) Load the SDK in the browser.
+      // 3) Embed paths: use the real embed_url from the intent response.
+      if (
+        config.integrationType === "iframe" ||
+        config.integrationType === "redirect"
+      ) {
+        if (!embedUrl) {
+          add(
+            "error",
+            "No embed_url was returned on the intent. For the embed paths, the intent response must include embed_url. Check that this integration/flow is configured for embedded checkout.",
+          );
+          setBusy(false);
+          return;
+        }
+
+        if (config.integrationType === "iframe") {
+          add("info", "Rendering MoneyHash embed in an iframe.", { embedUrl });
+          const container = document.getElementById("mh-embed");
+          if (container) {
+            container.innerHTML = "";
+            const iframe = document.createElement("iframe");
+            iframe.src = embedUrl;
+            iframe.style.width = "100%";
+            iframe.style.height = "100%";
+            iframe.style.minHeight = "520px";
+            iframe.style.border = "none";
+            container.appendChild(iframe);
+          }
+          add(
+            "info",
+            "Customer is completing payment in the embed. Final status arrives via redirect/webhook.",
+          );
+        } else {
+          add("info", "Redirecting to MoneyHash embed.", { embedUrl });
+          window.location.href = embedUrl;
+        }
+        setBusy(false);
+        return;
+      }
+
+      // 4) SDK path: init, log, getMethods, renderForm — all instrumented.
       let MoneyHash: new (o: Record<string, unknown>) => AnyMoneyHash;
       try {
         const mod = await import("@moneyhash/js-sdk/headless");
@@ -164,6 +230,12 @@ export function useCheckout() {
         return;
       }
 
+      add("sdk-call", "SDK: new MoneyHash({ type: 'payment', publicApiKey })", {
+        type: "payment",
+        publicApiKey: config.publicApiKey,
+        apiVersion: config.apiVersion,
+      });
+
       const mh = new MoneyHash({
         type: "payment",
         publicApiKey: config.publicApiKey,
@@ -176,53 +248,28 @@ export function useCheckout() {
           setOutcome("failed");
         },
       });
-      mhRef.current = mh;
 
-      // 4) For iframe / redirect integration, hand the whole intent to MoneyHash.
-      if (
-        config.integrationType === "iframe" ||
-        config.integrationType === "redirect"
-      ) {
-        add(
-          "info",
-          config.integrationType === "iframe"
-            ? "Rendering MoneyHash embed inside the page."
-            : "Handing off to MoneyHash embed.",
-        );
-        try {
-          const details = await mh.renderForm({
-            selector: "#mh-embed",
-            intentId,
-          });
-          applyState(details);
-        } catch (err) {
-          add("error", "Embed render failed.", String(err));
-        }
-        setBusy(false);
-        return;
-      }
-
-      // 5) SDK (self-rendered) path: get methods, then render the form so the
-      //    user can complete payment. We surface the methods so the demo shows
-      //    what Get Methods returned.
+      // getMethods — logged
       try {
-        add("request", "Get methods for this intent", { intentId });
+        add("sdk-call", "SDK: getMethods({ intentId })", { intentId });
         const methods = await mh.getMethods({ intentId });
-        add("response", "Methods returned.", methods);
+        add("response", "SDK: methods returned", methods);
       } catch (err) {
-        add("error", "Get methods failed.", String(err));
+        add("error", "SDK getMethods failed.", String(err));
       }
 
-      // Render the SDK form into the embed container to complete the payment.
+      // renderForm — MoneyHash handles the UI; we log the call and the result.
       try {
-        add("info", "Rendering SDK checkout form.");
+        add("sdk-call", "SDK: renderForm({ selector: '#mh-embed', intentId })", {
+          intentId,
+        });
         const details = await mh.renderForm({
           selector: "#mh-embed",
           intentId,
         });
         applyState(details);
       } catch (err) {
-        add("error", "SDK form render failed.", String(err));
+        add("error", "SDK renderForm failed.", String(err));
       }
 
       setBusy(false);
