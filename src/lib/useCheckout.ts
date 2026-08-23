@@ -49,7 +49,6 @@ interface AnyMoneyHash {
     collect: () => Promise<unknown>;
     pay: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
   };
-  setPublicApiKey?: (k: string) => void;
 }
 
 let counter = 0;
@@ -74,7 +73,6 @@ function redact(obj: unknown): unknown {
   return clone;
 }
 
-// Terminal states that end the flow.
 function outcomeForState(state?: string): Outcome {
   switch (state) {
     case "INTENT_PROCESSED":
@@ -90,16 +88,34 @@ function outcomeForState(state?: string): Outcome {
   }
 }
 
+// "phase" tells the UI which button/action to present.
+//  idle          → nothing started
+//  methods-shown → methods loaded (methods-first), waiting for pick + pay
+//  running       → a payment is in progress
+//  done          → terminal outcome reached
+export type Phase = "idle" | "methods-shown" | "running" | "done";
+
 export function useCheckout() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
-  // Methods surfaced for the method-selection step (methods-first flow).
+  const [phase, setPhase] = useState<Phase>("idle");
   const [methods, setMethods] = useState<MethodLike[]>([]);
-  const [awaitingMethod, setAwaitingMethod] = useState(false);
+  const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
+
   const mhRef = useRef<AnyMoneyHash | null>(null);
   const configRef = useRef<DemoConfig | null>(null);
   const intentIdRef = useRef<string | null>(null);
+  // The isolated DOM node the SDK/iframe render into (set by the page via ref).
+  const stageRef = useRef<HTMLElement | null>(null);
+
+  const setStage = useCallback((el: HTMLElement | null) => {
+    stageRef.current = el;
+  }, []);
+
+  const clearStage = useCallback(() => {
+    if (stageRef.current) stageRef.current.innerHTML = "";
+  }, []);
 
   const add = useCallback(
     (
@@ -132,16 +148,19 @@ export function useCheckout() {
   const reset = useCallback(() => {
     setLog([]);
     setOutcome(null);
+    setPhase("idle");
     setMethods([]);
-    setAwaitingMethod(false);
+    setSelectedMethodId(null);
     intentIdRef.current = null;
-    const container = document.getElementById("mh-embed");
-    if (container) container.innerHTML = "";
-  }, []);
+    clearStage();
+  }, [clearStage]);
 
-  // Create the intent via the relay. Returns { intentId, embedUrl } or null.
   const createIntent = useCallback(
-    async (config: DemoConfig, body: Record<string, unknown>, baseURL: string) => {
+    async (
+      config: DemoConfig,
+      body: Record<string, unknown>,
+      baseURL: string,
+    ) => {
       add("request", "Create intent → POST /payments/intent/", {
         endpoint: `${baseURL}/payments/intent/`,
         body,
@@ -192,9 +211,9 @@ export function useCheckout() {
     [add],
   );
 
-  // Load the SDK and build an instance (logged).
   const buildSdk = useCallback(
     async (config: DemoConfig): Promise<AnyMoneyHash | null> => {
+      if (mhRef.current) return mhRef.current;
       let MoneyHash: new (o: Record<string, unknown>) => AnyMoneyHash;
       try {
         const mod = await import("@moneyhash/js-sdk/headless");
@@ -217,10 +236,12 @@ export function useCheckout() {
         onComplete: (event: unknown) => {
           add("sdk-state", "onComplete fired", event);
           setOutcome("success");
+          setPhase("done");
         },
         onFail: (event: unknown) => {
           add("sdk-state", "onFail fired", event);
           setOutcome("failed");
+          setPhase("done");
         },
       });
       mhRef.current = mh;
@@ -229,119 +250,15 @@ export function useCheckout() {
     [add],
   );
 
-  // Render card fields into the stage, collect, and pay.
-  const payWithCard = useCallback(
-    async (mh: AnyMoneyHash, config: DemoConfig, intentId: string) => {
-      // Build the card field containers in the stage.
-      const stage = document.getElementById("mh-embed");
-      if (!stage) {
-        add("error", "Checkout stage container not found.");
-        return;
-      }
-      stage.innerHTML = `
-        <div style="max-width:420px;margin:0 auto;font-family:var(--sans)">
-          <div style="font-size:13px;font-weight:600;margin-bottom:12px">Card details</div>
-          <label style="font-size:11px;color:#5a626e">Card number</label>
-          <div id="mh-card-number" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div>
-          <div style="display:flex;gap:10px">
-            <div style="flex:1">
-              <label style="font-size:11px;color:#5a626e">Expiry month</label>
-              <div id="mh-card-exp-month" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div>
-            </div>
-            <div style="flex:1">
-              <label style="font-size:11px;color:#5a626e">Expiry year</label>
-              <div id="mh-card-exp-year" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div>
-            </div>
-            <div style="flex:1">
-              <label style="font-size:11px;color:#5a626e">CVV</label>
-              <div id="mh-card-cvv" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div>
-            </div>
-          </div>
-          <label style="font-size:11px;color:#5a626e">Card holder name (optional)</label>
-          <div id="mh-card-holder" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 14px;padding:0 4px"></div>
-          <button id="mh-pay-btn" style="width:100%;padding:12px;border:none;border-radius:9px;background:var(--signal);color:#fff;font-weight:600;font-size:14px;cursor:pointer">Pay now</button>
-          <div id="mh-3ds" style="margin-top:16px"></div>
-          <div id="rendered-url-iframe-container" style="margin-top:16px"></div>
-        </div>`;
-
-      add("sdk-call", "SDK: elements() + create card fields", {
-        fields: [
-          "cardNumber",
-          "cardExpiryMonth",
-          "cardExpiryYear",
-          "cardCvv",
-          "cardHolderName",
-        ],
-      });
-
-      const elements = mh.elements({
-        styles: { fontSize: "14px", padding: "10px" },
-      });
-      const mk = (elementType: string, selector: string, placeholder: string) => {
-        const el = elements.create({
-          elementType,
-          elementOptions: { selector, placeholder },
-        });
-        el.mount();
-        return el;
-      };
-      mk("cardNumber", "#mh-card-number", "1234 5678 9012 3456");
-      mk("cardExpiryMonth", "#mh-card-exp-month", "MM");
-      mk("cardExpiryYear", "#mh-card-exp-year", "YY");
-      mk("cardCvv", "#mh-card-cvv", "123");
-      mk("cardHolderName", "#mh-card-holder", "Name on card");
-
-      const payBtn = document.getElementById("mh-pay-btn") as HTMLButtonElement;
-      payBtn.onclick = async () => {
-        payBtn.disabled = true;
-        payBtn.textContent = "Processing…";
-        try {
-          add("sdk-call", "SDK: cardForm.collect()");
-          const t0 = performance.now();
-          const cardData = await mh.cardForm.collect();
-          add("response", "SDK: card data collected", cardData, {
-            durationMs: Math.round(performance.now() - t0),
-          });
-
-          const saveCard = config.scenarioId === "save-card";
-          add("sdk-call", "SDK: cardForm.pay({ intentId, cardData, saveCard })", {
-            intentId,
-            saveCard,
-          });
-          const t1 = performance.now();
-          let details = await mh.cardForm.pay({
-            intentId,
-            cardData,
-            saveCard,
-          });
-          add("response", "SDK: pay returned", details, {
-            durationMs: Math.round(performance.now() - t1),
-          });
-          details = await handleState(mh, details);
-          const oc = outcomeForState(details.state);
-          if (oc) setOutcome(oc);
-        } catch (err) {
-          add("error", "Card payment failed.", err);
-          payBtn.disabled = false;
-          payBtn.textContent = "Pay now";
-        }
-      };
-    },
-    [add],
-  );
-
-  // Handle a returned state — notably 3DS URL rendering; loop if needed.
   const handleState = useCallback(
     async (
       mh: AnyMoneyHash,
       details: IntentDetailsLike,
     ): Promise<IntentDetailsLike> => {
       let current = details;
-      // Guard against infinite loops.
       for (let i = 0; i < 5; i++) {
         add("sdk-state", `SDK state: ${current.state ?? "unknown"}`, current);
         if (outcomeForState(current.state)) return current;
-
         if (current.state === "URL_TO_RENDER") {
           const sd = current.stateDetails as
             | { url?: string; renderStrategy?: string }
@@ -365,7 +282,6 @@ export function useCheckout() {
             }
           }
         }
-        // Unhandled non-terminal state — stop and report.
         return current;
       }
       return current;
@@ -373,91 +289,248 @@ export function useCheckout() {
     [add],
   );
 
-  // Called when the user picks a method in the methods-first flow.
-  const selectMethod = useCallback(
-    async (methodId: string) => {
-      const mh = mhRef.current;
-      const config = configRef.current;
-      if (!mh || !config) return;
-      setAwaitingMethod(false);
-      setMethods([]);
-      setBusy(true);
+  // Render card fields into the ISOLATED stage, collect, and pay.
+  const renderCardAndPay = useCallback(
+    async (mh: AnyMoneyHash, config: DemoConfig, intentId: string) => {
+      const stage = stageRef.current;
+      if (!stage) {
+        add("error", "Checkout stage not ready.");
+        return;
+      }
+      stage.innerHTML = `
+        <div style="max-width:420px;font-family:var(--sans)">
+          <div style="font-size:13px;font-weight:600;margin-bottom:12px">Card details</div>
+          <label style="font-size:11px;color:#5a626e">Card number</label>
+          <div id="mh-card-number" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div>
+          <div style="display:flex;gap:10px">
+            <div style="flex:1"><label style="font-size:11px;color:#5a626e">Exp. month</label>
+              <div id="mh-card-exp-month" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div></div>
+            <div style="flex:1"><label style="font-size:11px;color:#5a626e">Exp. year</label>
+              <div id="mh-card-exp-year" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div></div>
+            <div style="flex:1"><label style="font-size:11px;color:#5a626e">CVV</label>
+              <div id="mh-card-cvv" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div></div>
+          </div>
+          <label style="font-size:11px;color:#5a626e">Card holder name (optional)</label>
+          <div id="mh-card-holder" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 14px;padding:0 4px"></div>
+          <button id="mh-pay-btn" style="width:100%;padding:12px;border:none;border-radius:9px;background:var(--signal);color:#fff;font-weight:600;font-size:14px;cursor:pointer">Pay now</button>
+          <div id="rendered-url-iframe-container" style="margin-top:16px"></div>
+        </div>`;
 
+      add("sdk-call", "SDK: elements() + create card fields", {
+        fields: [
+          "cardNumber",
+          "cardExpiryMonth",
+          "cardExpiryYear",
+          "cardCvv",
+          "cardHolderName",
+        ],
+      });
+
+      const elements = mh.elements({
+        styles: { fontSize: "14px", padding: "10px" },
+      });
+      const mk = (
+        elementType: string,
+        selector: string,
+        placeholder: string,
+      ) => {
+        const el = elements.create({
+          elementType,
+          elementOptions: { selector, placeholder },
+        });
+        el.mount();
+      };
+      mk("cardNumber", "#mh-card-number", "1234 5678 9012 3456");
+      mk("cardExpiryMonth", "#mh-card-exp-month", "MM");
+      mk("cardExpiryYear", "#mh-card-exp-year", "YY");
+      mk("cardCvv", "#mh-card-cvv", "123");
+      mk("cardHolderName", "#mh-card-holder", "Name on card");
+
+      const payBtn = stage.querySelector("#mh-pay-btn") as HTMLButtonElement;
+      if (payBtn) {
+        payBtn.onclick = async () => {
+          payBtn.disabled = true;
+          payBtn.textContent = "Processing…";
+          try {
+            add("sdk-call", "SDK: cardForm.collect()");
+            const t0 = performance.now();
+            const cardData = await mh.cardForm.collect();
+            add("response", "SDK: card data collected", cardData, {
+              durationMs: Math.round(performance.now() - t0),
+            });
+            const saveCard = config.scenarioId === "save-card";
+            add(
+              "sdk-call",
+              "SDK: cardForm.pay({ intentId, cardData, saveCard })",
+              { intentId, saveCard },
+            );
+            const t1 = performance.now();
+            let details = await mh.cardForm.pay({ intentId, cardData, saveCard });
+            add("response", "SDK: pay returned", details, {
+              durationMs: Math.round(performance.now() - t1),
+            });
+            details = await handleState(mh, details);
+            const oc = outcomeForState(details.state);
+            if (oc) {
+              setOutcome(oc);
+              setPhase("done");
+            }
+          } catch (err) {
+            add("error", "Card payment failed.", err);
+            payBtn.disabled = false;
+            payBtn.textContent = "Pay now";
+          }
+        };
+      }
+    },
+    [add, handleState],
+  );
+
+  // Enrich the payload once, shared by all flows.
+  const parsePayload = useCallback(
+    (config: DemoConfig): Record<string, unknown> | null => {
+      let body: Record<string, unknown>;
+      try {
+        body = JSON.parse(config.intentPayload);
+      } catch {
+        add("error", "Intent payload is not valid JSON.");
+        return null;
+      }
+      mergeFields(body, config);
+      return body;
+    },
+    [add],
+  );
+
+  // ---- Public action 1: Load methods (methods-first only) ----
+  const loadMethods = useCallback(
+    async (config: DemoConfig) => {
+      reset();
+      setBusy(true);
+      setPhase("running");
+      configRef.current = config;
+
+      const body = parsePayload(config);
+      if (!body) {
+        setBusy(false);
+        setPhase("idle");
+        return;
+      }
+      const mh = await buildSdk(config);
+      if (!mh) {
+        setBusy(false);
+        setPhase("idle");
+        return;
+      }
+      add("sdk-call", "SDK: getMethods({ currency, amount, flowId })", {
+        currency: body.amount_currency,
+        amount: body.amount,
+        flowId: config.flowId || undefined,
+      });
+      try {
+        const t0 = performance.now();
+        const res = await mh.getMethods({
+          currency: body.amount_currency,
+          amount: body.amount,
+          ...(config.flowId ? { flowId: config.flowId } : {}),
+          ...(config.scenarioValues.customerId
+            ? { customer: config.scenarioValues.customerId }
+            : {}),
+        });
+        add("response", "SDK: methods returned", res, {
+          durationMs: Math.round(performance.now() - t0),
+        });
+        setMethods(res.paymentMethods ?? []);
+        setPhase("methods-shown");
+      } catch (err) {
+        add("error", "getMethods failed.", err);
+        setPhase("idle");
+      }
+      setBusy(false);
+    },
+    [add, reset, parsePayload, buildSdk],
+  );
+
+  // ---- Public action 2: Pay (methods-first, after a method is selected) ----
+  const payNow = useCallback(
+    async (config: DemoConfig) => {
+      if (!selectedMethodId) {
+        add("info", "Pick a payment method first.");
+        return;
+      }
+      const mh = mhRef.current;
+      if (!mh) {
+        add("error", "SDK not initialised. Load methods first.");
+        return;
+      }
+      setBusy(true);
+      setPhase("running");
       const baseURL = buildBaseURL(config.environment, config.apiVersion);
 
-      // In methods-first, the intent is created now (on selection/pay).
-      let intentId = intentIdRef.current;
-      if (!intentId) {
-        let body: Record<string, unknown>;
-        try {
-          body = JSON.parse(config.intentPayload);
-        } catch {
-          add("error", "Intent payload is not valid JSON.");
-          setBusy(false);
-          return;
-        }
-        mergeFields(body, config);
-        const created = await createIntent(config, body, baseURL);
-        if (!created) {
-          setBusy(false);
-          return;
-        }
-        intentId = created.intentId;
+      const body = parsePayload(config);
+      if (!body) {
+        setBusy(false);
+        return;
       }
-
-      if (!intentId) {
-        add("error", "No intent id available to proceed.");
+      const created = await createIntent(config, body, baseURL);
+      if (!created) {
         setBusy(false);
         return;
       }
 
-      if (methodId === "CARD") {
-        await payWithCard(mh, config, intentId);
+      if (selectedMethodId === "CARD") {
+        await renderCardAndPay(mh, config, created.intentId);
       } else {
-        // Non-card: proceed with the method and handle whatever state returns.
-        add("sdk-call", "SDK: proceedWith({ intentId, type: 'method', id })", {
-          intentId,
-          id: methodId,
+        add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id })", {
+          intentId: created.intentId,
+          id: selectedMethodId,
         });
         try {
           const details = await mh.proceedWith({
-            intentId,
+            intentId: created.intentId,
             type: "method",
-            id: methodId,
+            id: selectedMethodId,
           });
           add("response", "SDK: proceedWith returned", details);
           const final = await handleState(mh, details);
           const oc = outcomeForState(final.state);
-          if (oc) setOutcome(oc);
+          if (oc) {
+            setOutcome(oc);
+            setPhase("done");
+          }
         } catch (err) {
           add("error", "proceedWith failed.", err);
         }
       }
       setBusy(false);
     },
-    [add, createIntent, payWithCard, handleState],
+    [
+      add,
+      selectedMethodId,
+      parsePayload,
+      createIntent,
+      renderCardAndPay,
+      handleState,
+    ],
   );
 
-  const start = useCallback(
+  // ---- Public action 3: Start payment (intent-first SDK, and embed paths) ----
+  const startPayment = useCallback(
     async (config: DemoConfig) => {
       reset();
       setBusy(true);
+      setPhase("running");
       configRef.current = config;
 
       const baseURL = buildBaseURL(config.environment, config.apiVersion);
-
-      // Parse + enrich the payload.
-      let body: Record<string, unknown>;
-      try {
-        body = JSON.parse(config.intentPayload);
-      } catch {
-        add("error", "Intent payload is not valid JSON.");
+      const body = parsePayload(config);
+      if (!body) {
         setBusy(false);
+        setPhase("idle");
         return;
       }
-      mergeFields(body, config);
 
-      // ---- Embed paths (iframe / redirect): create intent, use embed_url ----
+      // Embed paths.
       if (
         config.integrationType === "iframe" ||
         config.integrationType === "redirect"
@@ -470,7 +543,7 @@ export function useCheckout() {
         if (!created.embedUrl) {
           add(
             "error",
-            "No embed_url returned. This integration/flow may not be set up for embedded checkout.",
+            "No embed_url returned. This flow may not be set up for embedded checkout.",
           );
           setBusy(false);
           return;
@@ -479,14 +552,13 @@ export function useCheckout() {
           add("info", "Rendering MoneyHash embed in an iframe.", {
             embedUrl: created.embedUrl,
           });
-          const container = document.getElementById("mh-embed");
-          if (container) {
-            container.innerHTML = "";
+          if (stageRef.current) {
+            stageRef.current.innerHTML = "";
             const iframe = document.createElement("iframe");
             iframe.src = created.embedUrl;
             iframe.style.cssText =
               "width:100%;height:100%;min-height:520px;border:none";
-            container.appendChild(iframe);
+            stageRef.current.appendChild(iframe);
           }
         } else {
           add("info", "Redirecting to MoneyHash embed.", {
@@ -498,95 +570,103 @@ export function useCheckout() {
         return;
       }
 
-      // ---- SDK path (self-rendered) ----
+      // SDK intent-first.
       const mh = await buildSdk(config);
       if (!mh) {
         setBusy(false);
         return;
       }
-
-      // Get the payload amount/currency for the account-level getMethods.
-      const amount = body.amount;
-      const currency = body.amount_currency;
-
-      if (config.methodTiming === "intent-first") {
-        // Create the intent, then fetch its methods.
-        const created = await createIntent(config, body, baseURL);
-        if (!created) {
-          setBusy(false);
-          return;
-        }
-        add("sdk-call", "SDK: getMethods({ intentId })", {
-          intentId: created.intentId,
+      const created = await createIntent(config, body, baseURL);
+      if (!created) {
+        setBusy(false);
+        return;
+      }
+      add("sdk-call", "SDK: getMethods({ intentId })", {
+        intentId: created.intentId,
+      });
+      try {
+        const t0 = performance.now();
+        const res = await mh.getMethods({ intentId: created.intentId });
+        add("response", "SDK: methods returned", res, {
+          durationMs: Math.round(performance.now() - t0),
         });
-        try {
-          const t0 = performance.now();
-          const res = await mh.getMethods({ intentId: created.intentId });
-          add("response", "SDK: methods returned", res, {
-            durationMs: Math.round(performance.now() - t0),
-          });
-          setMethods(res.paymentMethods ?? []);
-          setAwaitingMethod(true);
-        } catch (err) {
-          add("error", "getMethods failed.", err);
-        }
-      } else {
-        // Methods-first: fetch account methods now (no intent yet).
-        add("sdk-call", "SDK: getMethods({ currency, amount, flowId })", {
-          currency,
-          amount,
-          flowId: config.flowId || undefined,
-        });
-        try {
-          const t0 = performance.now();
-          const res = await mh.getMethods({
-            currency,
-            amount,
-            ...(config.flowId ? { flowId: config.flowId } : {}),
-            ...(config.scenarioValues.customerId
-              ? { customer: config.scenarioValues.customerId }
-              : {}),
-          });
-          add("response", "SDK: methods returned", res, {
-            durationMs: Math.round(performance.now() - t0),
-          });
-          setMethods(res.paymentMethods ?? []);
-          setAwaitingMethod(true);
-        } catch (err) {
-          add("error", "getMethods failed.", err);
-        }
+        setMethods(res.paymentMethods ?? []);
+        setPhase("methods-shown");
+      } catch (err) {
+        add("error", "getMethods failed.", err);
       }
       setBusy(false);
     },
-    [add, reset, createIntent, buildSdk],
+    [add, reset, parsePayload, createIntent, buildSdk],
+  );
+
+  // Called when a method is picked (intent-first: intent already exists → pay).
+  const selectMethod = useCallback(
+    async (methodId: string) => {
+      setSelectedMethodId(methodId);
+      const config = configRef.current;
+      const mh = mhRef.current;
+      if (!config || !mh) return;
+
+      // Intent-first: intent already created, so proceed straight to pay.
+      if (config.methodTiming === "intent-first" && intentIdRef.current) {
+        setBusy(true);
+        setPhase("running");
+        if (methodId === "CARD") {
+          await renderCardAndPay(mh, config, intentIdRef.current);
+        } else {
+          add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id })", {
+            intentId: intentIdRef.current,
+            id: methodId,
+          });
+          try {
+            const details = await mh.proceedWith({
+              intentId: intentIdRef.current,
+              type: "method",
+              id: methodId,
+            });
+            add("response", "SDK: proceedWith returned", details);
+            const final = await handleState(mh, details);
+            const oc = outcomeForState(final.state);
+            if (oc) {
+              setOutcome(oc);
+              setPhase("done");
+            }
+          } catch (err) {
+            add("error", "proceedWith failed.", err);
+          }
+        }
+        setBusy(false);
+      }
+      // Methods-first: just record the selection; user clicks "Pay" next.
+    },
+    [add, renderCardAndPay, handleState],
   );
 
   return {
     log,
     busy,
     outcome,
+    phase,
     methods,
-    awaitingMethod,
+    selectedMethodId,
+    setStage,
+    loadMethods,
+    payNow,
+    startPayment,
     selectMethod,
-    start,
     reset,
   };
 }
 
-// Merge dedicated config fields into the intent body (raw JSON wins).
-// If the user hasn't supplied redirect URLs, default them to the built-in
-// /result page so redirects land somewhere sensible instead of failing.
 function mergeFields(body: Record<string, unknown>, config: DemoConfig) {
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
   const resultUrl = origin ? `${origin}/result` : "";
-
   const setIfAbsent = (key: string, value?: string) => {
     if (value && body[key] === undefined) body[key] = value;
   };
   setIfAbsent("flow_id", config.flowId);
   setIfAbsent("webhook_url", config.webhookUrl);
-  // Redirects: use the user's URL if given, else the built-in result page.
   setIfAbsent("successful_redirect_url", config.successUrl || resultUrl);
   setIfAbsent("failed_redirect_url", config.failUrl || resultUrl);
   setIfAbsent(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { useCheckout } from "@/lib/useCheckout";
@@ -11,13 +11,24 @@ import Inspector from "@/components/Inspector";
 export default function CheckoutPage() {
   const router = useRouter();
   const { cart, currency, config, setConfig } = useStore();
-  const { log, busy, outcome, methods, awaitingMethod, selectMethod, start, reset } =
-    useCheckout();
+  const {
+    log,
+    busy,
+    outcome,
+    phase,
+    methods,
+    selectedMethodId,
+    setStage,
+    loadMethods,
+    payNow,
+    startPayment,
+    selectMethod,
+    reset,
+  } = useCheckout();
   const [payloadEdited, setPayloadEdited] = useState(false);
 
-  // Build the base payload from the cart, then let the scenario shape it.
-  const buildFullPayload = useMemo(() => {
-    return (scenarioId: string, values: Record<string, string>) => {
+  const buildFullPayload = useCallback(
+    (scenarioId: string, values: Record<string, string>) => {
       const items = cart.map((i) => ({
         name: i.product.name,
         description: i.product.description,
@@ -35,11 +46,11 @@ export default function CheckoutPage() {
         form_only: true,
       };
       return getScenario(scenarioId).buildPayload(base, values);
-    };
-  }, [cart, currency]);
+    },
+    [cart, currency],
+  );
 
-  // Seed the editable payload from cart + scenario when arriving (once),
-  // unless the user has hand-edited it.
+  // Seed the editable payload once on arrival, unless hand-edited.
   useEffect(() => {
     if (!payloadEdited) {
       setConfig({
@@ -53,8 +64,6 @@ export default function CheckoutPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildFullPayload, payloadEdited]);
 
-  // When the scenario changes, rewrite the payload (and reset the edited flag
-  // so the new scenario's shape takes effect), but keep it overwritable after.
   function handleScenarioChange(scenarioId: string) {
     setPayloadEdited(false);
     setConfig({
@@ -81,6 +90,20 @@ export default function CheckoutPage() {
     setConfig(p);
   }
 
+  // Which primary action does the button trigger?
+  // Methods-first + SDK: "Load payment methods" (then a Pay button appears).
+  // Everything else: "Start payment".
+  const isMethodsFirstSdk =
+    config.integrationType === "sdk" && config.methodTiming === "methods-first";
+
+  function handlePrimary() {
+    if (isMethodsFirstSdk) {
+      loadMethods(config);
+    } else {
+      startPayment(config);
+    }
+  }
+
   const outcomeMeta = {
     success: { text: "Payment successful", color: "var(--ok)" },
     failed: { text: "Payment failed", color: "var(--bad)" },
@@ -92,6 +115,9 @@ export default function CheckoutPage() {
     (sum, i) => sum + (i.product.price[currency] ?? 0) * i.quantity,
     0,
   );
+
+  const showPayButton =
+    isMethodsFirstSdk && phase === "methods-shown" && !!selectedMethodId;
 
   return (
     <div
@@ -127,7 +153,23 @@ export default function CheckoutPage() {
           >
             ← Back to shop
           </button>
-          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Checkout</h1>
+          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+            Checkout{" "}
+            <span
+              className="mono"
+              style={{
+                fontSize: 10,
+                fontWeight: 500,
+                color: "var(--signal-deep)",
+                background: "rgba(18,181,176,0.1)",
+                padding: "1px 6px",
+                borderRadius: 5,
+                verticalAlign: "middle",
+              }}
+            >
+              v7
+            </span>
+          </h1>
           <p
             style={{
               margin: "4px 0 0",
@@ -136,14 +178,15 @@ export default function CheckoutPage() {
               lineHeight: 1.4,
             }}
           >
-            Configure your keys, then start the payment and watch each call.
+            Configure your keys, then run the payment and watch each call.
           </p>
         </div>
         <ConfigPanel
           config={config}
           onChange={patch}
           onScenarioChange={handleScenarioChange}
-          onStart={() => start(config)}
+          onStart={handlePrimary}
+          startLabel={isMethodsFirstSdk ? "Load payment methods" : "Start payment"}
           busy={busy}
           payloadError={payloadError}
         />
@@ -214,22 +257,6 @@ export default function CheckoutPage() {
           </div>
         )}
 
-        {cart.length === 0 && (
-          <div
-            style={{
-              padding: "12px 16px",
-              borderRadius: 9,
-              marginBottom: 18,
-              border: "1px solid var(--warn)",
-              color: "var(--warn)",
-              fontSize: 13,
-            }}
-          >
-            Your cart is empty. You can still test with the payload on the left,
-            or go back to the shop to add items.
-          </div>
-        )}
-
         {outcome && (
           <div
             style={{
@@ -247,52 +274,73 @@ export default function CheckoutPage() {
           </div>
         )}
 
-        {awaitingMethod && methods.length > 0 && (
+        {/* Method selection (both orderings surface methods here) */}
+        {phase === "methods-shown" && methods.length > 0 && (
           <div style={{ marginBottom: 18 }}>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                marginBottom: 10,
-              }}
-            >
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
               Choose a payment method
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {methods.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => selectMethod(m.id)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "12px 14px",
-                    border: "1px solid var(--paper-edge)",
-                    borderRadius: 10,
-                    background: "#fff",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontSize: 14,
-                    fontWeight: 500,
-                  }}
-                >
-                  {m.icons && m.icons[0] && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={m.icons[0]}
-                      alt=""
-                      style={{ height: 22, width: "auto" }}
-                    />
-                  )}
-                  {m.title || m.id}
-                </button>
-              ))}
+              {methods.map((m) => {
+                const active = selectedMethodId === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => selectMethod(m.id)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      border: active
+                        ? "2px solid var(--signal)"
+                        : "1px solid var(--paper-edge)",
+                      borderRadius: 10,
+                      background: active ? "rgba(18,181,176,0.06)" : "#fff",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {m.icons && m.icons[0] && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={m.icons[0]}
+                        alt=""
+                        style={{ height: 22, width: "auto" }}
+                      />
+                    )}
+                    {m.title || m.id}
+                  </button>
+                );
+              })}
             </div>
+
+            {showPayButton && (
+              <button
+                onClick={() => payNow(config)}
+                disabled={busy}
+                style={{
+                  marginTop: 14,
+                  width: "100%",
+                  padding: "12px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  borderRadius: 9,
+                  border: "none",
+                  background: busy ? "var(--paper-edge)" : "var(--signal)",
+                  color: busy ? "var(--text-soft)" : "#fff",
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
+              >
+                {busy ? "Working…" : `Pay with ${selectedMethodId}`}
+              </button>
+            )}
           </div>
         )}
 
-        {awaitingMethod && methods.length === 0 && (
+        {phase === "methods-shown" && methods.length === 0 && (
           <div
             style={{
               padding: "12px 16px",
@@ -308,37 +356,60 @@ export default function CheckoutPage() {
           </div>
         )}
 
-        <div
-          id="mh-embed"
-          style={{
-            flex: 1,
-            minHeight: 360,
-            borderRadius: 12,
-            border: "1px dashed var(--paper-edge)",
-            display: log.length === 0 ? "flex" : "block",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 8,
-          }}
-        >
-          {log.length === 0 && (
-            <p
-              style={{
-                color: "var(--text-soft)",
-                fontSize: 13,
-                textAlign: "center",
-                maxWidth: 320,
-                lineHeight: 1.5,
-              }}
-            >
-              The checkout form will appear here once you start the payment.
-            </p>
-          )}
-        </div>
+        {/* ISOLATED stage: React renders this empty div ONCE and never touches
+            its children. The SDK / iframe render into it via the ref. This is
+            what prevents the removeChild crash. */}
+        <IsolatedStage setStage={setStage} empty={log.length === 0} />
       </main>
 
       {/* RIGHT: inspector */}
       <Inspector entries={log} />
+    </div>
+  );
+}
+
+// A container React renders once and then leaves alone. We pass the node up via
+// a ref callback; React never re-renders its children because they're never
+// React children — they're added by the SDK outside React's tree.
+function IsolatedStage({
+  setStage,
+  empty,
+}: {
+  setStage: (el: HTMLElement | null) => void;
+  empty: boolean;
+}) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 360,
+        borderRadius: 12,
+        border: "1px dashed var(--paper-edge)",
+        padding: 16,
+        position: "relative",
+      }}
+    >
+      {empty && (
+        <p
+          style={{
+            color: "var(--text-soft)",
+            fontSize: 13,
+            textAlign: "center",
+            maxWidth: 320,
+            lineHeight: 1.5,
+            margin: "80px auto",
+          }}
+        >
+          The checkout form will appear here once you start the payment.
+        </p>
+      )}
+      {/* The node the SDK/iframe fill. React owns only this empty div and never
+          re-renders its inner content. */}
+      <div
+        ref={setStage}
+        suppressHydrationWarning
+        style={{ width: "100%", height: "100%" }}
+      />
     </div>
   );
 }

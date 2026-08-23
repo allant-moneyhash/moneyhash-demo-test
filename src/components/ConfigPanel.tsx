@@ -30,6 +30,7 @@ export default function ConfigPanel({
   onChange,
   onScenarioChange,
   onStart,
+  startLabel,
   busy,
   payloadError,
 }: {
@@ -37,6 +38,7 @@ export default function ConfigPanel({
   onChange: (patch: Partial<DemoConfig>) => void;
   onScenarioChange: (scenarioId: string) => void;
   onStart: () => void;
+  startLabel: string;
   busy: boolean;
   payloadError: string | null;
 }) {
@@ -489,7 +491,7 @@ export default function ConfigPanel({
           color: canStart ? "#fff" : "var(--text-soft)",
         }}
       >
-        {busy ? "Working…" : "Start payment"}
+        {busy ? "Working…" : startLabel}
       </button>
     </div>
   );
