@@ -35,14 +35,14 @@ function ResultInner() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "var(--paper)",
+        background: "var(--white)",
         padding: 24,
       }}
     >
       <div
         style={{
           background: "#fff",
-          border: "1px solid var(--paper-edge)",
+          border: "1px solid var(--edge)",
           borderRadius: 16,
           padding: "40px 36px",
           maxWidth: 440,
@@ -96,7 +96,7 @@ function ResultInner() {
             fontWeight: 600,
             borderRadius: 9,
             border: "none",
-            background: "var(--ink)",
+            background: "var(--navy)",
             color: "#fff",
             cursor: "pointer",
           }}

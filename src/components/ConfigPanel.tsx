@@ -17,7 +17,7 @@ const labelStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "9px 11px",
-  border: "1px solid var(--paper-edge)",
+  border: "1px solid var(--edge)",
   borderRadius: 8,
   background: "#fff",
   fontSize: 13,
@@ -85,10 +85,10 @@ export default function ConfigPanel({
                   borderRadius: 8,
                   cursor: "pointer",
                   border: active
-                    ? "1px solid var(--signal)"
-                    : "1px solid var(--paper-edge)",
-                  background: active ? "rgba(18,181,176,0.08)" : "#fff",
-                  color: active ? "var(--signal-deep)" : "var(--text-soft)",
+                    ? "1px solid var(--accent)"
+                    : "1px solid var(--edge)",
+                  background: active ? "rgba(31,95,208,0.08)" : "#fff",
+                  color: active ? "var(--accent-deep)" : "var(--text-soft)",
                   fontWeight: active ? 600 : 400,
                 }}
               >
@@ -345,10 +345,10 @@ export default function ConfigPanel({
                   borderRadius: 8,
                   cursor: "pointer",
                   border: active
-                    ? "1px solid var(--signal)"
-                    : "1px solid var(--paper-edge)",
-                  background: active ? "rgba(18,181,176,0.08)" : "#fff",
-                  color: active ? "var(--signal-deep)" : "var(--text)",
+                    ? "1px solid var(--accent)"
+                    : "1px solid var(--edge)",
+                  background: active ? "rgba(31,95,208,0.08)" : "#fff",
+                  color: active ? "var(--accent-deep)" : "var(--text)",
                   fontWeight: active ? 600 : 400,
                 }}
               >
@@ -382,10 +382,10 @@ export default function ConfigPanel({
                     borderRadius: 8,
                     cursor: "pointer",
                     border: active
-                      ? "1px solid var(--signal)"
-                      : "1px solid var(--paper-edge)",
-                    background: active ? "rgba(18,181,176,0.08)" : "#fff",
-                    color: active ? "var(--signal-deep)" : "var(--text-soft)",
+                      ? "1px solid var(--accent)"
+                      : "1px solid var(--edge)",
+                    background: active ? "rgba(31,95,208,0.08)" : "#fff",
+                    color: active ? "var(--accent-deep)" : "var(--text-soft)",
                     fontWeight: active ? 600 : 400,
                   }}
                 >
@@ -426,10 +426,10 @@ export default function ConfigPanel({
                   borderRadius: 6,
                   cursor: "pointer",
                   border: active
-                    ? "1px solid var(--signal)"
-                    : "1px solid var(--paper-edge)",
-                  background: active ? "rgba(18,181,176,0.08)" : "#fff",
-                  color: active ? "var(--signal-deep)" : "var(--text-soft)",
+                    ? "1px solid var(--accent)"
+                    : "1px solid var(--edge)",
+                  background: active ? "rgba(31,95,208,0.08)" : "#fff",
+                  color: active ? "var(--accent-deep)" : "var(--text-soft)",
                 }}
               >
                 {cur}
@@ -487,7 +487,7 @@ export default function ConfigPanel({
           borderRadius: 9,
           border: "none",
           cursor: canStart ? "pointer" : "not-allowed",
-          background: canStart ? "var(--signal)" : "var(--paper-edge)",
+          background: canStart ? "var(--accent)" : "var(--edge)",
           color: canStart ? "#fff" : "var(--text-soft)",
         }}
       >

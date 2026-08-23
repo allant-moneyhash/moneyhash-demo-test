@@ -17,6 +17,8 @@ interface MethodLike {
   title: string;
   icons?: string[];
   confirmationRequired?: boolean;
+  // Which bucket this came from — determines how we proceed with it.
+  kind?: "method" | "express" | "customerBalance" | "savedCard";
 }
 
 interface MethodsResult {
@@ -53,6 +55,18 @@ interface AnyMoneyHash {
 
 let counter = 0;
 const nextId = () => `${Date.now()}-${counter++}`;
+
+// Combine all the buckets getMethods returns into one tagged list to render.
+function flattenMethods(res: MethodsResult): MethodLike[] {
+  const tag = (arr: unknown[] | undefined, kind: MethodLike["kind"]) =>
+    (arr ?? []).map((m) => ({ ...(m as MethodLike), kind }));
+  return [
+    ...tag(res.paymentMethods, "method"),
+    ...tag(res.expressMethods, "express"),
+    ...tag(res.savedCards as unknown[], "savedCard"),
+    ...tag(res.customerBalances as unknown[], "customerBalance"),
+  ];
+}
 
 function redact(obj: unknown): unknown {
   if (!obj || typeof obj !== "object") return obj;
@@ -102,6 +116,7 @@ export function useCheckout() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [methods, setMethods] = useState<MethodLike[]>([]);
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
+  const selectedMethodRef = useRef<MethodLike | null>(null);
 
   const mhRef = useRef<AnyMoneyHash | null>(null);
   const configRef = useRef<DemoConfig | null>(null);
@@ -151,6 +166,7 @@ export function useCheckout() {
     setPhase("idle");
     setMethods([]);
     setSelectedMethodId(null);
+    selectedMethodRef.current = null;
     intentIdRef.current = null;
     mhRef.current = null;
     clearStage();
@@ -221,16 +237,30 @@ export function useCheckout() {
       // (embed.moneyhash.io). A sandbox key sent there returns 401. So we point
       // the SDK at the correct embed host for the chosen environment BEFORE the
       // SDK constructs (it reads this window var when creating its iframe).
-      const embedHost = ENVIRONMENTS[config.environment].embedHost;
+      const env = ENVIRONMENTS[config.environment];
+      const embedHost = env.embedHost;
       if (typeof window !== "undefined") {
-        (window as unknown as { MONEYHASH_IFRAME_URL?: string }).MONEYHASH_IFRAME_URL =
-          embedHost;
+        const w = window as unknown as {
+          MONEYHASH_IFRAME_URL?: string;
+          MONEYHASH_VAULT_API_URL?: string;
+          MONEYHASH_VAULT_INPUT_IFRAME_URL?: string;
+        };
+        w.MONEYHASH_IFRAME_URL = embedHost;
+        // The card fields + access-token generation talk to the vault, which
+        // also defaults to production. Point it at the right vault per env,
+        // otherwise cardForm.collect() fails with "Incorrect authentication
+        // credentials" when a sandbox key hits the production vault.
+        w.MONEYHASH_VAULT_API_URL = env.vaultApiUrl;
+        w.MONEYHASH_VAULT_INPUT_IFRAME_URL = env.vaultFormUrl;
         // If a hidden SDK iframe already exists (e.g. from a previous env),
         // remove it so the SDK rebuilds it against the correct host.
         const existing = document.getElementById("moneyhash-headless-sdk");
         if (existing) existing.remove();
       }
-      add("info", `SDK embed host set to ${embedHost}`);
+      add(
+        "info",
+        `SDK hosts set — embed: ${embedHost}, vault: ${env.vaultApiUrl}`,
+      );
 
       let MoneyHash: new (o: Record<string, unknown>) => AnyMoneyHash;
       try {
@@ -316,22 +346,22 @@ export function useCheckout() {
         return;
       }
       stage.innerHTML = `
-        <div style="max-width:420px;font-family:var(--sans)">
-          <div style="font-size:13px;font-weight:600;margin-bottom:12px">Card details</div>
-          <label style="font-size:11px;color:#5a626e">Card number</label>
-          <div id="mh-card-number" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div>
-          <div style="display:flex;gap:10px">
-            <div style="flex:1"><label style="font-size:11px;color:#5a626e">Exp. month</label>
-              <div id="mh-card-exp-month" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div></div>
-            <div style="flex:1"><label style="font-size:11px;color:#5a626e">Exp. year</label>
-              <div id="mh-card-exp-year" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div></div>
-            <div style="flex:1"><label style="font-size:11px;color:#5a626e">CVV</label>
-              <div id="mh-card-cvv" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 10px;padding:0 4px"></div></div>
+        <div style="width:100%;font-family:var(--sans)">
+          <div style="font-size:13px;font-weight:600;margin-bottom:16px;text-transform:uppercase;letter-spacing:0.06em;color:#0C1E3D">Card details</div>
+          <label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">Card number</label>
+          <div id="mh-card-number" style="height:48px;border:1px solid #d9dee6;margin-bottom:16px;padding:0 12px;background:#fff"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
+            <div><label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">Expiry month</label>
+              <div id="mh-card-exp-month" style="height:48px;border:1px solid #d9dee6;padding:0 12px;background:#fff"></div></div>
+            <div><label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">Expiry year</label>
+              <div id="mh-card-exp-year" style="height:48px;border:1px solid #d9dee6;padding:0 12px;background:#fff"></div></div>
+            <div><label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">CVV</label>
+              <div id="mh-card-cvv" style="height:48px;border:1px solid #d9dee6;padding:0 12px;background:#fff"></div></div>
           </div>
-          <label style="font-size:11px;color:#5a626e">Card holder name (optional)</label>
-          <div id="mh-card-holder" style="height:42px;border:1px solid #e9e5db;border-radius:8px;margin:4px 0 14px;padding:0 4px"></div>
-          <button id="mh-pay-btn" style="width:100%;padding:12px;border:none;border-radius:9px;background:var(--signal);color:#fff;font-weight:600;font-size:14px;cursor:pointer">Pay now</button>
-          <div id="rendered-url-iframe-container" style="margin-top:16px"></div>
+          <label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">Card holder name (optional)</label>
+          <div id="mh-card-holder" style="height:48px;border:1px solid #d9dee6;margin-bottom:20px;padding:0 12px;background:#fff"></div>
+          <button id="mh-pay-btn" style="width:100%;padding:14px;border:1px solid #0C1E3D;background:#0C1E3D;color:#fff;font-weight:600;font-size:14px;cursor:pointer">Pay now</button>
+          <div id="rendered-url-iframe-container" style="margin-top:20px"></div>
         </div>`;
 
       add("sdk-call", "SDK: elements() + create card fields", {
@@ -420,6 +450,46 @@ export function useCheckout() {
     [add],
   );
 
+  const proceedNonCard = useCallback(
+    async (mh: AnyMoneyHash, method: MethodLike, intentId: string) => {
+      if (method.kind === "express") {
+        add(
+          "info",
+          `${method.title} needs its native payment sheet (e.g. Google Pay / Apple Pay), which isn't wired in this demo yet. Card, wallet, and saved cards work.`,
+        );
+        return;
+      }
+      const typeMap: Record<string, string> = {
+        method: "method",
+        customerBalance: "customerBalance",
+        savedCard: "savedCard",
+      };
+      const type = typeMap[method.kind ?? "method"] ?? "method";
+      add("sdk-call", `SDK: proceedWith({ intentId, type:'${type}', id })`, {
+        intentId,
+        type,
+        id: method.id,
+      });
+      try {
+        const details = await mh.proceedWith({
+          intentId,
+          type,
+          id: method.id,
+        });
+        add("response", "SDK: proceedWith returned", details);
+        const final = await handleState(mh, details);
+        const oc = outcomeForState(final.state);
+        if (oc) {
+          setOutcome(oc);
+          setPhase("done");
+        }
+      } catch (err) {
+        add("error", "proceedWith failed.", err);
+      }
+    },
+    [add, handleState],
+  );
+
   // ---- Public action 1: Load methods (methods-first only) ----
   const loadMethods = useCallback(
     async (config: DemoConfig) => {
@@ -458,7 +528,7 @@ export function useCheckout() {
         add("response", "SDK: methods returned", res, {
           durationMs: Math.round(performance.now() - t0),
         });
-        setMethods(res.paymentMethods ?? []);
+        setMethods(flattenMethods(res));
         setPhase("methods-shown");
       } catch (err) {
         add("error", "getMethods failed.", err);
@@ -496,29 +566,13 @@ export function useCheckout() {
         return;
       }
 
-      if (selectedMethodId === "CARD") {
+      const sel = selectedMethodRef.current;
+      if (selectedMethodId === "CARD" && (!sel || sel.kind === "method")) {
         await renderCardAndPay(mh, config, created.intentId);
+      } else if (sel) {
+        await proceedNonCard(mh, sel, created.intentId);
       } else {
-        add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id })", {
-          intentId: created.intentId,
-          id: selectedMethodId,
-        });
-        try {
-          const details = await mh.proceedWith({
-            intentId: created.intentId,
-            type: "method",
-            id: selectedMethodId,
-          });
-          add("response", "SDK: proceedWith returned", details);
-          const final = await handleState(mh, details);
-          const oc = outcomeForState(final.state);
-          if (oc) {
-            setOutcome(oc);
-            setPhase("done");
-          }
-        } catch (err) {
-          add("error", "proceedWith failed.", err);
-        }
+        add("error", "No method selected.");
       }
       setBusy(false);
     },
@@ -528,6 +582,7 @@ export function useCheckout() {
       parsePayload,
       createIntent,
       renderCardAndPay,
+      proceedNonCard,
       handleState,
     ],
   );
@@ -608,7 +663,7 @@ export function useCheckout() {
         add("response", "SDK: methods returned", res, {
           durationMs: Math.round(performance.now() - t0),
         });
-        setMethods(res.paymentMethods ?? []);
+        setMethods(flattenMethods(res));
         setPhase("methods-shown");
       } catch (err) {
         add("error", "getMethods failed.", err);
@@ -619,9 +674,13 @@ export function useCheckout() {
   );
 
   // Called when a method is picked (intent-first: intent already exists → pay).
+  // Proceed with a non-card method: map its bucket to the proceedWith type.
+
   const selectMethod = useCallback(
-    async (methodId: string) => {
+    async (method: MethodLike) => {
+      const methodId = method.id;
       setSelectedMethodId(methodId);
+      selectedMethodRef.current = method;
       const config = configRef.current;
       const mh = mhRef.current;
       if (!config || !mh) return;
@@ -630,29 +689,10 @@ export function useCheckout() {
       if (config.methodTiming === "intent-first" && intentIdRef.current) {
         setBusy(true);
         setPhase("running");
-        if (methodId === "CARD") {
+        if (methodId === "CARD" && method.kind === "method") {
           await renderCardAndPay(mh, config, intentIdRef.current);
         } else {
-          add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id })", {
-            intentId: intentIdRef.current,
-            id: methodId,
-          });
-          try {
-            const details = await mh.proceedWith({
-              intentId: intentIdRef.current,
-              type: "method",
-              id: methodId,
-            });
-            add("response", "SDK: proceedWith returned", details);
-            const final = await handleState(mh, details);
-            const oc = outcomeForState(final.state);
-            if (oc) {
-              setOutcome(oc);
-              setPhase("done");
-            }
-          } catch (err) {
-            add("error", "proceedWith failed.", err);
-          }
+          await proceedNonCard(mh, method, intentIdRef.current);
         }
         setBusy(false);
       }

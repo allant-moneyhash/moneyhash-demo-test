@@ -4,11 +4,11 @@ import { useState } from "react";
 import { LogEntry, LogKind } from "@/lib/types";
 
 const KIND_META: Record<LogKind, { label: string; color: string }> = {
-  request: { label: "REQUEST", color: "var(--signal)" },
+  request: { label: "REQUEST", color: "var(--accent)" },
   response: { label: "RESPONSE", color: "var(--ok)" },
   "sdk-call": { label: "SDK CALL", color: "#4a9de0" },
   "sdk-state": { label: "SDK STATE", color: "#9a86e0" },
-  info: { label: "INFO", color: "var(--ink-dim)" },
+  info: { label: "INFO", color: "var(--navy-dim)" },
   error: { label: "ERROR", color: "var(--bad)" },
 };
 
@@ -18,7 +18,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
   const hasBody = !!entry.body;
 
   return (
-    <div style={{ borderBottom: "1px solid var(--ink-line)" }}>
+    <div style={{ borderBottom: "1px solid var(--navy-line)" }}>
       <button
         onClick={() => hasBody && setOpen((o) => !o)}
         style={{
@@ -49,7 +49,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
         </span>
         <span
           style={{
-            color: "var(--ink-text)",
+            color: "#c9d1dc",
             fontSize: 13,
             flex: 1,
             lineHeight: 1.3,
@@ -62,7 +62,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
             className="mono"
             style={{
               fontSize: 10.5,
-              color: "var(--ink-dim)",
+              color: "var(--navy-dim)",
               flexShrink: 0,
             }}
           >
@@ -74,7 +74,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
         {hasBody && (
           <span
             className="mono"
-            style={{ color: "var(--ink-dim)", fontSize: 11, flexShrink: 0 }}
+            style={{ color: "var(--navy-dim)", fontSize: 11, flexShrink: 0 }}
           >
             {open ? "−" : "+"}
           </span>
@@ -86,7 +86,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
           style={{
             margin: 0,
             padding: "0 14px 12px 14px",
-            color: "var(--ink-dim)",
+            color: "var(--navy-dim)",
             fontSize: 11.5,
             lineHeight: 1.55,
             whiteSpace: "pre-wrap",
@@ -105,8 +105,8 @@ export default function Inspector({ entries }: { entries: LogEntry[] }) {
   return (
     <div
       style={{
-        background: "var(--ink)",
-        color: "var(--ink-text)",
+        background: "var(--navy)",
+        color: "#c9d1dc",
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -116,7 +116,7 @@ export default function Inspector({ entries }: { entries: LogEntry[] }) {
       <div
         style={{
           padding: "14px 16px",
-          borderBottom: "1px solid var(--ink-line)",
+          borderBottom: "1px solid var(--navy-line)",
           display: "flex",
           alignItems: "center",
           gap: 10,
@@ -127,9 +127,9 @@ export default function Inspector({ entries }: { entries: LogEntry[] }) {
             width: 8,
             height: 8,
             borderRadius: "50%",
-            background: entries.length ? "var(--signal)" : "var(--ink-dim)",
+            background: entries.length ? "var(--accent)" : "var(--navy-dim)",
             boxShadow: entries.length
-              ? "0 0 8px var(--signal)"
+              ? "0 0 8px var(--accent)"
               : "none",
           }}
         />
@@ -139,14 +139,14 @@ export default function Inspector({ entries }: { entries: LogEntry[] }) {
             fontSize: 13,
             fontWeight: 600,
             letterSpacing: "0.02em",
-            color: "var(--ink-text)",
+            color: "#c9d1dc",
           }}
         >
           Inspector
         </h2>
         <span
           className="mono"
-          style={{ marginLeft: "auto", fontSize: 11, color: "var(--ink-dim)" }}
+          style={{ marginLeft: "auto", fontSize: 11, color: "var(--navy-dim)" }}
         >
           {entries.length} {entries.length === 1 ? "event" : "events"}
         </span>
@@ -157,7 +157,7 @@ export default function Inspector({ entries }: { entries: LogEntry[] }) {
           <div
             style={{
               padding: "28px 18px",
-              color: "var(--ink-dim)",
+              color: "var(--navy-dim)",
               fontSize: 13,
               lineHeight: 1.6,
             }}

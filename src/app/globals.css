@@ -1,39 +1,41 @@
 @import "tailwindcss";
 
 /*
-  Design direction: "instrument panel".
-  The tool has two sides. The LEFT (shop/checkout) is calm and paper-like so the
-  demo looks like a real store. The RIGHT (inspector) is a dark control surface
-  where the API machinery is on display. One accent — a signal cyan — marks
-  "live activity" and primary actions. Type pairs a humanist sans for reading
-  with a monospace for all the machine data.
+  MoneyHash-branded, boxy design system.
+  Anchor color: #0C1E3D (MH navy). White surfaces, thin hard rules, NO rounded
+  corners anywhere, flat (no shadows). Type: Inter.
 */
 
 :root {
-  --paper: #f7f5f0;
-  --paper-edge: #e9e5db;
-  --ink: #14171c;
-  --ink-soft: #1c2027;
-  --ink-line: #2b313b;
-  --ink-text: #c9d1dc;
-  --ink-dim: #7b8695;
+  --navy: #0C1E3D;
+  --navy-2: #14284a;      /* slightly lighter navy for panels */
+  --navy-line: #21365c;   /* borders on navy surfaces */
+  --navy-dim: #8593ad;    /* muted text on navy */
 
-  --text: #22262d;
-  --text-soft: #5a626e;
+  --white: #ffffff;
+  --surface: #f4f6f8;     /* light neutral section bg */
+  --edge: #d9dee6;        /* hard 1px borders on light */
+  --edge-strong: #b7c0cd;
 
-  --signal: #12b5b0;
-  --signal-deep: #0c8f8b;
-  --ok: #2f9e6f;
-  --warn: #d98324;
-  --bad: #d1495b;
+  --text: #10203a;        /* near-navy body text */
+  --text-soft: #5a6577;
 
-  --radius: 10px;
+  --accent: #FADCAF;       /* MH cream (from the logo) */
+  --accent-deep: #e8c48c;  /* deeper cream for hover/borders */
+  --accent-text: #0C1E3D;  /* navy text on cream surfaces */
+  --accent-line: #e3c9a0;  /* cream-toned border */
+
+  --ok: #1f8a5b;
+  --warn: #b46a1f;
+  --bad: #c0392b;
+
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 * {
   box-sizing: border-box;
+  border-radius: 0 !important; /* boxy everywhere — no rounded corners */
 }
 
 html,
@@ -46,7 +48,7 @@ body {
 body {
   font-family: var(--sans);
   color: var(--text);
-  background: var(--paper);
+  background: var(--white);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -55,8 +57,8 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--signal);
-  outline-offset: 2px;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 @media (prefers-reduced-motion: reduce) {

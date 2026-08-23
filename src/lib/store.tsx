@@ -20,6 +20,8 @@ interface Store {
   cartCount: number;
   config: DemoConfig;
   setConfig: (patch: Partial<DemoConfig>) => void;
+  step: number;
+  setStep: (n: number) => void;
 }
 
 const StoreContext = createContext<Store | null>(null);
@@ -28,6 +30,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [currency, setCurrency] = useState("AED");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [config, setConfigState] = useState<DemoConfig>(DEFAULT_CONFIG);
+  const [step, setStep] = useState(1);
 
   const addToCart = useCallback((p: Product) => {
     setCart((prev) => {
@@ -73,6 +76,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         cartCount,
         config,
         setConfig,
+        step,
+        setStep,
       }}
     >
       {children}
