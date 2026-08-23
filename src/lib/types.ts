@@ -6,14 +6,16 @@ export type Environment = "sandbox" | "production";
 
 // Each environment is just a host. The API version is chosen separately, so the
 // base URL is built from host + version at request time.
-export const ENVIRONMENTS: Record<Environment, { label: string; host: string }> = {
+export const ENVIRONMENTS: Record<Environment, { label: string; host: string; embedHost: string }> = {
   sandbox: {
     label: "Sandbox (staging)",
     host: "https://staging-web.moneyhash.io",
+    embedHost: "https://stg-embed.moneyhash.io",
   },
   production: {
     label: "Production (live money — careful)",
     host: "https://web.moneyhash.io",
+    embedHost: "https://embed.moneyhash.io",
   },
 };
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { DemoConfig, buildBaseURL, LogEntry, LogKind, Outcome } from "./types";
+import { DemoConfig, buildBaseURL, ENVIRONMENTS, LogEntry, LogKind, Outcome } from "./types";
 
 interface IntentDetailsLike {
   intent?: { id?: string; status?: string };
@@ -152,6 +152,7 @@ export function useCheckout() {
     setMethods([]);
     setSelectedMethodId(null);
     intentIdRef.current = null;
+    mhRef.current = null;
     clearStage();
   }, [clearStage]);
 
@@ -214,6 +215,23 @@ export function useCheckout() {
   const buildSdk = useCallback(
     async (config: DemoConfig): Promise<AnyMoneyHash | null> => {
       if (mhRef.current) return mhRef.current;
+
+      // CRITICAL: the SDK's account-level calls (getMethods without an intent)
+      // run through a hidden iframe whose host defaults to production
+      // (embed.moneyhash.io). A sandbox key sent there returns 401. So we point
+      // the SDK at the correct embed host for the chosen environment BEFORE the
+      // SDK constructs (it reads this window var when creating its iframe).
+      const embedHost = ENVIRONMENTS[config.environment].embedHost;
+      if (typeof window !== "undefined") {
+        (window as unknown as { MONEYHASH_IFRAME_URL?: string }).MONEYHASH_IFRAME_URL =
+          embedHost;
+        // If a hidden SDK iframe already exists (e.g. from a previous env),
+        // remove it so the SDK rebuilds it against the correct host.
+        const existing = document.getElementById("moneyhash-headless-sdk");
+        if (existing) existing.remove();
+      }
+      add("info", `SDK embed host set to ${embedHost}`);
+
       let MoneyHash: new (o: Record<string, unknown>) => AnyMoneyHash;
       try {
         const mod = await import("@moneyhash/js-sdk/headless");
