@@ -81,7 +81,35 @@ export interface DemoConfig {
   // Raw JSON the user edits — becomes the create-intent request body.
   // Mirrors the shop's `...extraConfig` pattern: whatever you put here is sent.
   intentPayload: string;
+  // Billing + shipping details, merged into the intent payload.
+  billing: ContactDetails;
+  shipping: ContactDetails;
+  shippingSameAsBilling: boolean;
 }
+
+export interface ContactDetails {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string;
+  address: string;
+  city: string;
+  state: string;
+  country: string;
+  postal_code: string;
+}
+
+export const EMPTY_CONTACT: ContactDetails = {
+  first_name: "",
+  last_name: "",
+  email: "",
+  phone_number: "",
+  address: "",
+  city: "",
+  state: "",
+  country: "",
+  postal_code: "",
+};
 
 // A single entry in the inspector panel (right side).
 export type LogKind = "request" | "response" | "sdk-call" | "sdk-state" | "info" | "error";
@@ -112,6 +140,7 @@ export interface Product {
   price: Record<string, number>;
   emoji: string;
   tint: string;
+  image: string;
 }
 
 export interface CartItem {

@@ -57,15 +57,30 @@ let counter = 0;
 const nextId = () => `${Date.now()}-${counter++}`;
 
 // Combine all the buckets getMethods returns into one tagged list to render.
+// Order: express (Google/Apple Pay) first, then Card, then other payment
+// methods (bank transfer, wallet, BNPL…), then saved cards, then balances.
 function flattenMethods(res: MethodsResult): MethodLike[] {
   const tag = (arr: unknown[] | undefined, kind: MethodLike["kind"]) =>
     (arr ?? []).map((m) => ({ ...(m as MethodLike), kind }));
-  return [
-    ...tag(res.paymentMethods, "method"),
-    ...tag(res.expressMethods, "express"),
-    ...tag(res.savedCards as unknown[], "savedCard"),
-    ...tag(res.customerBalances as unknown[], "customerBalance"),
-  ];
+
+  const express = tag(res.expressMethods, "express");
+  const allPay = tag(res.paymentMethods, "method");
+  const card = allPay.filter((m) => m.id === "CARD");
+  const otherPay = allPay.filter((m) => m.id !== "CARD");
+  const saved = tag(res.savedCards as unknown[], "savedCard").map((m) => ({
+    ...m,
+    title: m.title || `Saved card ${m.id}`,
+  }));
+  const balances = tag(res.customerBalances as unknown[], "customerBalance").map(
+    (m) => ({
+      ...m,
+      title:
+        m.title ||
+        (m.id === "SELFSERVE_WALLET" ? "Wallet balance" : `Balance ${m.id}`),
+    }),
+  );
+
+  return [...express, ...card, ...otherPay, ...saved, ...balances];
 }
 
 function redact(obj: unknown): unknown {
@@ -171,6 +186,9 @@ export function useCheckout() {
     mhRef.current = null;
     clearStage();
   }, [clearStage]);
+
+  // Clears just the inspector log, leaving the current run/state intact.
+  const clearLog = useCallback(() => setLog([]), []);
 
   const createIntent = useCallback(
     async (
@@ -338,6 +356,31 @@ export function useCheckout() {
   );
 
   // Render card fields into the ISOLATED stage, collect, and pay.
+  // Attach a created intent to the SDK instance. The SDK's card pay path
+  // authenticates the intent via its secret, which the SDK only learns when an
+  // intent-scoped call runs. Since we create the intent through our own relay,
+  // we must call an intent-scoped SDK method once (getMethods by intentId) so
+  // the SDK registers the intent + secret. Without this, cardForm.pay fails
+  // with "Valid intent secret is required."
+  const attachIntentToSdk = useCallback(
+    async (mh: AnyMoneyHash, intentId: string) => {
+      try {
+        add("sdk-call", "SDK: getMethods({ intentId }) — attach intent", {
+          intentId,
+        });
+        const res = await mh.getMethods({ intentId });
+        add("response", "SDK: intent attached (methods for intent)", res);
+      } catch (err) {
+        add(
+          "error",
+          "Could not attach the intent to the SDK (getMethods by intentId).",
+          err,
+        );
+      }
+    },
+    [add],
+  );
+
   const renderCardAndPay = useCallback(
     async (mh: AnyMoneyHash, config: DemoConfig, intentId: string) => {
       const stage = stageRef.current;
@@ -568,6 +611,7 @@ export function useCheckout() {
 
       const sel = selectedMethodRef.current;
       if (selectedMethodId === "CARD" && (!sel || sel.kind === "method")) {
+        await attachIntentToSdk(mh, created.intentId);
         await renderCardAndPay(mh, config, created.intentId);
       } else if (sel) {
         await proceedNonCard(mh, sel, created.intentId);
@@ -581,6 +625,7 @@ export function useCheckout() {
       selectedMethodId,
       parsePayload,
       createIntent,
+      attachIntentToSdk,
       renderCardAndPay,
       proceedNonCard,
       handleState,
@@ -714,6 +759,7 @@ export function useCheckout() {
     startPayment,
     selectMethod,
     reset,
+    clearLog,
   };
 }
 
@@ -734,4 +780,22 @@ function mergeFields(body: Record<string, unknown>, config: DemoConfig) {
   setIfAbsent("time_expired_redirect_url", config.timeExpiredUrl || resultUrl);
   setIfAbsent("closed_redirect_url", config.closedUrl || resultUrl);
   setIfAbsent("back_url", config.backUrl || resultUrl);
+
+  // Billing / shipping — only include fields the user filled in.
+  const nonEmpty = (c: Record<string, string>) => {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(c)) if (v && v.trim()) out[k] = v.trim();
+    return out;
+  };
+  const billing = nonEmpty(config.billing as unknown as Record<string, string>);
+  if (Object.keys(billing).length && body.billing_data === undefined) {
+    body.billing_data = billing;
+  }
+  const shippingSrc = config.shippingSameAsBilling
+    ? config.billing
+    : config.shipping;
+  const shipping = nonEmpty(shippingSrc as unknown as Record<string, string>);
+  if (Object.keys(shipping).length && body.shipping_data === undefined) {
+    body.shipping_data = shipping;
+  }
 }

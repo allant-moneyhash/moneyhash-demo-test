@@ -101,7 +101,13 @@ function LogRow({ entry }: { entry: LogEntry }) {
   );
 }
 
-export default function Inspector({ entries }: { entries: LogEntry[] }) {
+export default function Inspector({
+  entries,
+  onClear,
+}: {
+  entries: LogEntry[];
+  onClear?: () => void;
+}) {
   return (
     <div
       style={{
@@ -150,6 +156,22 @@ export default function Inspector({ entries }: { entries: LogEntry[] }) {
         >
           {entries.length} {entries.length === 1 ? "event" : "events"}
         </span>
+        {onClear && entries.length > 0 && (
+          <button
+            onClick={onClear}
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--navy)",
+              background: "var(--accent)",
+              border: "1px solid var(--accent-line)",
+              padding: "4px 10px",
+              cursor: "pointer",
+            }}
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>

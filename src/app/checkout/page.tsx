@@ -15,7 +15,7 @@ export default function CheckoutWizard() {
   const { cart, currency, config, setConfig, step, setStep } = useStore();
   const {
     log, busy, outcome, phase, methods, selectedMethodId,
-    setStage, loadMethods, payNow, startPayment, selectMethod, reset,
+    setStage, loadMethods, payNow, startPayment, selectMethod, reset, clearLog,
   } = useCheckout();
   const [payloadEdited, setPayloadEdited] = useState(false);
 
@@ -199,7 +199,7 @@ export default function CheckoutWizard() {
             <IsolatedStage setStage={setStage} empty={log.length === 0} />
           </main>
 
-          <Inspector entries={log} />
+          <Inspector entries={log} onClear={clearLog} />
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { DemoConfig, DEFAULT_API_VERSION, Product } from "./types";
+import { DemoConfig, DEFAULT_API_VERSION, EMPTY_CONTACT, Product } from "./types";
 
 // A starter intent payload. Mirrors the shop's create-intent body but trimmed to
 // the essentials. The user can edit this freely — add flow_id, billing_data,
@@ -45,6 +45,9 @@ export const DEFAULT_CONFIG: DemoConfig = {
   closedUrl: "",
   backUrl: "",
   intentPayload: JSON.stringify(DEFAULT_INTENT_PAYLOAD, null, 2),
+  billing: { ...EMPTY_CONTACT },
+  shipping: { ...EMPTY_CONTACT },
+  shippingSameAsBilling: true,
 };
 
 // Common currencies to offer as quick picks.
@@ -61,6 +64,7 @@ export const PRODUCTS: Product[] = [
     price: { AED: 55, SAR: 55, EGP: 450, USD: 15, EUR: 14, GBP: 12 },
     emoji: "👜",
     tint: "#e8e0d2",
+    image: "/products/tote.svg",
   },
   {
     id: "headphones",
@@ -70,6 +74,7 @@ export const PRODUCTS: Product[] = [
     price: { AED: 320, SAR: 320, EGP: 2600, USD: 89, EUR: 82, GBP: 72 },
     emoji: "🎧",
     tint: "#d6e2e6",
+    image: "/products/headphones.svg",
   },
   {
     id: "notebook",
@@ -79,5 +84,6 @@ export const PRODUCTS: Product[] = [
     price: { AED: 40, SAR: 40, EGP: 320, USD: 11, EUR: 10, GBP: 9 },
     emoji: "📓",
     tint: "#e6dde6",
+    image: "/products/notebook.svg",
   },
 ];

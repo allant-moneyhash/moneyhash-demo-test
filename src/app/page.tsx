@@ -131,28 +131,24 @@ export default function Storefront() {
                     flexDirection: "column",
                   }}
                 >
-                  {/* Flat monochrome product block */}
+                  {/* Product image */}
                   <div
                     style={{
-                      height: 150,
+                      height: 170,
                       background: "var(--surface)",
                       borderBottom: "1px solid var(--edge)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
+                      overflow: "hidden",
                     }}
                   >
-                    <span
-                      style={{
-                        fontSize: 13,
-                        letterSpacing: "0.14em",
-                        textTransform: "uppercase",
-                        color: "var(--edge-strong)",
-                        fontWeight: 600,
-                      }}
-                    >
-                      {p.name.split(" ")[0]}
-                    </span>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.image}
+                      alt={p.name}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
                   </div>
                   <div
                     style={{

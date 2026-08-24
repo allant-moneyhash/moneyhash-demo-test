@@ -23,6 +23,19 @@ export default function Header({
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/moneyhash-logo.png" alt="MoneyHash" style={{ height: 34 }} />
+      <span
+        className="mono"
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          color: "var(--navy)",
+          background: "var(--accent)",
+          border: "1px solid var(--accent-line)",
+          padding: "2px 7px",
+        }}
+      >
+        v12
+      </span>
 
       {step !== undefined && (
         <div style={{ display: "flex", alignItems: "center", gap: 0, marginLeft: 8 }}>

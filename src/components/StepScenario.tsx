@@ -6,6 +6,7 @@ import {
   IntegrationType,
 } from "@/lib/types";
 import { SCENARIOS, getScenario } from "@/lib/scenarios";
+import BillingShipping from "@/components/BillingShipping";
 
 const label: React.CSSProperties = {
   display: "block",
@@ -135,10 +136,15 @@ export default function StepScenario({
               placeholder="added to payload as flow_id" autoComplete="off" spellCheck={false} />
           </div>
           <div style={{ marginBottom: 16 }}>
-            <label style={label} htmlFor="wh">Webhook URL (optional)</label>
-            <input id="wh" style={input} value={config.webhookUrl}
+            <label style={label} htmlFor="wh">Webhook URL (required)</label>
+            <input id="wh" style={{ ...input, borderColor: !config.webhookUrl ? "var(--bad)" : "var(--edge)" }} value={config.webhookUrl}
               onChange={(e) => onChange({ webhookUrl: e.target.value })}
               placeholder="https://webhook.site/your-id" autoComplete="off" spellCheck={false} />
+            {!config.webhookUrl && (
+              <p style={{ margin: "5px 0 0", fontSize: 11, color: "var(--bad)" }}>
+                A webhook URL is required. A webhook.site inbox works well for demos.
+              </p>
+            )}
           </div>
 
           <details style={{ marginBottom: 16, border: "1px solid var(--edge)", padding: "10px 12px" }}>
@@ -164,6 +170,22 @@ export default function StepScenario({
             </div>
           </details>
 
+          <details style={{ marginBottom: 16, border: "1px solid var(--edge)", padding: "10px 12px" }}>
+            <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--navy)" }}>
+              Billing &amp; shipping details
+            </summary>
+            <div style={{ marginTop: 14 }}>
+              <BillingShipping
+                billing={config.billing}
+                shipping={config.shipping}
+                sameAsBilling={config.shippingSameAsBilling}
+                onBillingChange={(patch) => onChange({ billing: { ...config.billing, ...patch } })}
+                onShippingChange={(patch) => onChange({ shipping: { ...config.shipping, ...patch } })}
+                onSameToggle={(v) => onChange({ shippingSameAsBilling: v })}
+              />
+            </div>
+          </details>
+
           <div>
             <label style={label} htmlFor="payload">Intent payload (JSON)</label>
             <textarea id="payload" value={config.intentPayload}
@@ -186,8 +208,8 @@ export default function StepScenario({
           style={{ padding: "13px 22px", fontSize: 14, fontWeight: 600, border: "1px solid var(--edge-strong)", background: "#fff", color: "var(--navy)", cursor: "pointer" }}>
           Back
         </button>
-        <button onClick={onRun} disabled={!!payloadError}
-          style={{ flex: 1, padding: "13px", fontSize: 14, fontWeight: 600, border: "1px solid var(--navy)", background: payloadError ? "var(--surface)" : "var(--navy)", color: payloadError ? "var(--text-soft)" : "#fff", cursor: payloadError ? "not-allowed" : "pointer" }}>
+        <button onClick={onRun} disabled={!!payloadError || !config.webhookUrl}
+          style={{ flex: 1, padding: "13px", fontSize: 14, fontWeight: 600, border: "1px solid var(--navy)", background: (payloadError || !config.webhookUrl) ? "var(--surface)" : "var(--navy)", color: (payloadError || !config.webhookUrl) ? "var(--text-soft)" : "#fff", cursor: (payloadError || !config.webhookUrl) ? "not-allowed" : "pointer" }}>
           {runLabel}
         </button>
       </div>
