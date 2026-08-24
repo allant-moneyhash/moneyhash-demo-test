@@ -51,19 +51,20 @@ interface AnyMoneyHash {
     collect: () => Promise<unknown>;
     pay: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
   };
+  submitPaymentReceipt: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
+  validateApplePayMerchantSession: (o: Record<string, unknown>) => Promise<unknown>;
 }
 
 let counter = 0;
 const nextId = () => `${Date.now()}-${counter++}`;
 
-// Combine all the buckets getMethods returns into one tagged list to render.
-// Order: express (Google/Apple Pay) first, then Card, then other payment
-// methods (bank transfer, wallet, BNPL…), then saved cards, then balances.
+// Combine the non-express buckets into one tagged list to render as the
+// regular method list. Express methods (Google/Apple Pay) are handled
+// separately as native buttons at the top.
 function flattenMethods(res: MethodsResult): MethodLike[] {
   const tag = (arr: unknown[] | undefined, kind: MethodLike["kind"]) =>
     (arr ?? []).map((m) => ({ ...(m as MethodLike), kind }));
 
-  const express = tag(res.expressMethods, "express");
   const allPay = tag(res.paymentMethods, "method");
   const card = allPay.filter((m) => m.id === "CARD");
   const otherPay = allPay.filter((m) => m.id !== "CARD");
@@ -80,7 +81,16 @@ function flattenMethods(res: MethodsResult): MethodLike[] {
     }),
   );
 
-  return [...express, ...card, ...otherPay, ...saved, ...balances];
+  // Card first, then other methods, saved cards, balances.
+  return [...card, ...otherPay, ...saved, ...balances];
+}
+
+// Extract express methods (Google/Apple Pay) for native buttons.
+function extractExpress(res: MethodsResult): MethodLike[] {
+  return (res.expressMethods ?? []).map((m) => ({
+    ...(m as MethodLike),
+    kind: "express" as const,
+  }));
 }
 
 function redact(obj: unknown): unknown {
@@ -130,6 +140,7 @@ export function useCheckout() {
   const [outcome, setOutcome] = useState<Outcome>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [methods, setMethods] = useState<MethodLike[]>([]);
+  const [expressMethods, setExpressMethods] = useState<MethodLike[]>([]);
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
   const selectedMethodRef = useRef<MethodLike | null>(null);
 
@@ -180,6 +191,7 @@ export function useCheckout() {
     setOutcome(null);
     setPhase("idle");
     setMethods([]);
+    setExpressMethods([]);
     setSelectedMethodId(null);
     selectedMethodRef.current = null;
     intentIdRef.current = null;
@@ -356,29 +368,130 @@ export function useCheckout() {
   );
 
   // Render card fields into the ISOLATED stage, collect, and pay.
-  // Attach a created intent to the SDK instance. The SDK's card pay path
-  // authenticates the intent via its secret, which the SDK only learns when an
-  // intent-scoped call runs. Since we create the intent through our own relay,
-  // we must call an intent-scoped SDK method once (getMethods by intentId) so
-  // the SDK registers the intent + secret. Without this, cardForm.pay fails
-  // with "Valid intent secret is required."
-  const attachIntentToSdk = useCallback(
-    async (mh: AnyMoneyHash, intentId: string) => {
+  // Prepare the SDK to accept a direct card payment for this intent.
+  // The correct order (confirmed from the SDK source — cardForm.pay sends only
+  // intentId, no secret) is:
+  //   getMethods({intentId}) → proceedWith({intentId, type:"method", id:"CARD"})
+  // proceedWith selects the method and establishes the intent session on the
+  // backend, so the subsequent cardForm.pay is authenticated. Without it, pay
+  // fails with "Valid intent secret is required."
+  const prepareCardIntent = useCallback(
+    async (mh: AnyMoneyHash, intentId: string): Promise<boolean> => {
       try {
-        add("sdk-call", "SDK: getMethods({ intentId }) — attach intent", {
+        add("sdk-call", "SDK: getMethods({ intentId })", { intentId });
+        const res = await mh.getMethods({ intentId });
+        add("response", "SDK: methods for intent", res);
+      } catch (err) {
+        add("error", "getMethods({ intentId }) failed.", err);
+        return false;
+      }
+      try {
+        add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id:'CARD' })", {
           intentId,
         });
-        const res = await mh.getMethods({ intentId });
-        add("response", "SDK: intent attached (methods for intent)", res);
+        const details = await mh.proceedWith({
+          intentId,
+          type: "method",
+          id: "CARD",
+        });
+        add("response", "SDK: proceedWith(CARD) returned", details);
+        return true;
       } catch (err) {
-        add(
-          "error",
-          "Could not attach the intent to the SDK (getMethods by intentId).",
-          err,
-        );
+        add("error", "proceedWith(CARD) failed.", err);
+        return false;
       }
     },
     [add],
+  );
+
+  // Enrich the payload once, shared by all flows.
+  const parsePayload = useCallback(
+    (config: DemoConfig): Record<string, unknown> | null => {
+      let body: Record<string, unknown>;
+      try {
+        body = JSON.parse(config.intentPayload);
+      } catch {
+        add("error", "Intent payload is not valid JSON.");
+        return null;
+      }
+      mergeFields(body, config);
+      return body;
+    },
+    [add],
+  );
+
+  // Ensure an intent exists (create it if methods-first hasn't yet). Returns id.
+  const ensureIntent = useCallback(
+    async (config: DemoConfig): Promise<string | null> => {
+      if (intentIdRef.current) return intentIdRef.current;
+      const baseURL = buildBaseURL(config.environment, config.apiVersion);
+      const body = parsePayload(config);
+      if (!body) return null;
+      const created = await createIntent(config, body, baseURL);
+      return created ? created.intentId : null;
+    },
+    [parsePayload, createIntent],
+  );
+
+  // Complete a native pay (Google/Apple) with a receipt obtained from the
+  // native sheet: select the method, then submit the receipt.
+  const submitNativeReceipt = useCallback(
+    async (
+      config: DemoConfig,
+      methodId: string,
+      receipt: Record<string, unknown>,
+    ) => {
+      const mh = mhRef.current || (await buildSdk(config));
+      if (!mh) return;
+      setBusy(true);
+      setPhase("running");
+      const intentId = await ensureIntent(config);
+      if (!intentId) {
+        setBusy(false);
+        return;
+      }
+      try {
+        add("sdk-call", `SDK: proceedWith({ type:'method', id:'${methodId}' })`, {
+          intentId,
+          id: methodId,
+        });
+        await mh.proceedWith({ intentId, type: "method", id: methodId });
+        add("sdk-call", "SDK: submitPaymentReceipt(...)", { intentId });
+        const details = await mh.submitPaymentReceipt({
+          intentId,
+          nativeReceiptData: receipt,
+        });
+        add("response", "SDK: submitPaymentReceipt returned", details);
+        const final = await handleState(mh, details);
+        const oc = outcomeForState(final.state);
+        if (oc) {
+          setOutcome(oc);
+          setPhase("done");
+        }
+      } catch (err) {
+        add("error", "Native payment failed.", err);
+      }
+      setBusy(false);
+    },
+    [add, buildSdk, ensureIntent, handleState],
+  );
+
+  // Validate an Apple Pay merchant session (used by the Apple Pay button).
+  const validateApplePay = useCallback(
+    async (config: DemoConfig, methodId: string, validationUrl: string) => {
+      const mh = mhRef.current || (await buildSdk(config));
+      if (!mh) return null;
+      try {
+        return await mh.validateApplePayMerchantSession({
+          methodId,
+          validationUrl,
+        });
+      } catch (err) {
+        add("error", "Apple Pay merchant validation failed.", err);
+        return null;
+      }
+    },
+    [add, buildSdk],
   );
 
   const renderCardAndPay = useCallback(
@@ -477,21 +590,6 @@ export function useCheckout() {
     [add, handleState],
   );
 
-  // Enrich the payload once, shared by all flows.
-  const parsePayload = useCallback(
-    (config: DemoConfig): Record<string, unknown> | null => {
-      let body: Record<string, unknown>;
-      try {
-        body = JSON.parse(config.intentPayload);
-      } catch {
-        add("error", "Intent payload is not valid JSON.");
-        return null;
-      }
-      mergeFields(body, config);
-      return body;
-    },
-    [add],
-  );
 
   const proceedNonCard = useCallback(
     async (mh: AnyMoneyHash, method: MethodLike, intentId: string) => {
@@ -571,7 +669,7 @@ export function useCheckout() {
         add("response", "SDK: methods returned", res, {
           durationMs: Math.round(performance.now() - t0),
         });
-        setMethods(flattenMethods(res));
+        setMethods(flattenMethods(res)); setExpressMethods(extractExpress(res));
         setPhase("methods-shown");
       } catch (err) {
         add("error", "getMethods failed.", err);
@@ -611,8 +709,8 @@ export function useCheckout() {
 
       const sel = selectedMethodRef.current;
       if (selectedMethodId === "CARD" && (!sel || sel.kind === "method")) {
-        await attachIntentToSdk(mh, created.intentId);
-        await renderCardAndPay(mh, config, created.intentId);
+        const ok = await prepareCardIntent(mh, created.intentId);
+        if (ok) await renderCardAndPay(mh, config, created.intentId);
       } else if (sel) {
         await proceedNonCard(mh, sel, created.intentId);
       } else {
@@ -625,7 +723,7 @@ export function useCheckout() {
       selectedMethodId,
       parsePayload,
       createIntent,
-      attachIntentToSdk,
+      prepareCardIntent,
       renderCardAndPay,
       proceedNonCard,
       handleState,
@@ -708,7 +806,7 @@ export function useCheckout() {
         add("response", "SDK: methods returned", res, {
           durationMs: Math.round(performance.now() - t0),
         });
-        setMethods(flattenMethods(res));
+        setMethods(flattenMethods(res)); setExpressMethods(extractExpress(res));
         setPhase("methods-shown");
       } catch (err) {
         add("error", "getMethods failed.", err);
@@ -735,7 +833,24 @@ export function useCheckout() {
         setBusy(true);
         setPhase("running");
         if (methodId === "CARD" && method.kind === "method") {
-          await renderCardAndPay(mh, config, intentIdRef.current);
+          // getMethods({intentId}) already ran in startPayment; still need
+          // proceedWith(CARD) to establish the session before pay.
+          add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id:'CARD' })", {
+            intentId: intentIdRef.current,
+          });
+          try {
+            const d = await mh.proceedWith({
+              intentId: intentIdRef.current,
+              type: "method",
+              id: "CARD",
+            });
+            add("response", "SDK: proceedWith(CARD) returned", d);
+            await renderCardAndPay(mh, config, intentIdRef.current);
+          } catch (err) {
+            add("error", "proceedWith(CARD) failed.", err);
+            setBusy(false);
+            return;
+          }
         } else {
           await proceedNonCard(mh, method, intentIdRef.current);
         }
@@ -760,6 +875,9 @@ export function useCheckout() {
     selectMethod,
     reset,
     clearLog,
+    expressMethods,
+    submitNativeReceipt,
+    validateApplePay,
   };
 }
 

@@ -9,6 +9,7 @@ import Header from "@/components/Header";
 import StepSetup from "@/components/StepSetup";
 import StepScenario from "@/components/StepScenario";
 import Inspector from "@/components/Inspector";
+import NativePayButtons from "@/components/NativePayButtons";
 
 export default function CheckoutWizard() {
   const router = useRouter();
@@ -16,6 +17,7 @@ export default function CheckoutWizard() {
   const {
     log, busy, outcome, phase, methods, selectedMethodId,
     setStage, loadMethods, payNow, startPayment, selectMethod, reset, clearLog,
+    expressMethods, submitNativeReceipt, validateApplePay,
   } = useCheckout();
   const [payloadEdited, setPayloadEdited] = useState(false);
 
@@ -154,6 +156,20 @@ export default function CheckoutWizard() {
               <div style={{ padding: "12px 16px", marginBottom: 18, background: "#fff", border: `1px solid ${outcomeMeta[outcome].color}`, color: outcomeMeta[outcome].color, fontWeight: 600, fontSize: 14 }}>
                 {outcomeMeta[outcome].text}
               </div>
+            )}
+
+            {phase === "methods-shown" && (expressMethods.length > 0 || methods.length > 0) && (
+              <>
+                {expressMethods.length > 0 && (
+                  <NativePayButtons
+                    express={expressMethods}
+                    environment={config.environment}
+                    onGoogleToken={(receipt) => submitNativeReceipt(config, "GOOGLE_PAY", receipt)}
+                    onAppleReceipt={(receipt) => submitNativeReceipt(config, "APPLE_PAY", receipt)}
+                    onValidateApple={(methodId, url) => validateApplePay(config, methodId, url)}
+                  />
+                )}
+              </>
             )}
 
             {phase === "methods-shown" && methods.length > 0 && (
