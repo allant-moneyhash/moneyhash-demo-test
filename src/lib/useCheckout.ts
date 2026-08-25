@@ -55,6 +55,8 @@ interface AnyMoneyHash {
   validateApplePayMerchantSession: (o: Record<string, unknown>) => Promise<unknown>;
   renderForm: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
   setIntentSecret: (secret: string) => void;
+  submitForm: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
+  submitCvv: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
 }
 
 let counter = 0;
@@ -118,7 +120,11 @@ function outcomeForState(state?: string): Outcome {
   switch (state) {
     case "INTENT_PROCESSED":
       return "success";
+    case "CARD_INTENT_SUCCESSFUL":
+      return "success";
     case "TRANSACTION_FAILED":
+      return "failed";
+    case "CARD_INTENT_FAILED":
       return "failed";
     case "CLOSED":
       return "cancelled";
@@ -361,34 +367,124 @@ export function useCheckout() {
       details: IntentDetailsLike,
     ): Promise<IntentDetailsLike> => {
       let current = details;
-      for (let i = 0; i < 5; i++) {
-        add("sdk-state", `SDK state: ${current.state ?? "unknown"}`, current);
+      // Loop through the SDK state machine until we reach a terminal state.
+      // Each state has a prescribed action per the MoneyHash docs.
+      for (let i = 0; i < 12; i++) {
+        add("sdk-state", `SDK state: ${current.state ?? "unknown"}`, {
+          state: current.state,
+          paymentStatus: (current as { paymentStatus?: unknown }).paymentStatus,
+        });
+
+        // Terminal states → stop.
         if (outcomeForState(current.state)) return current;
-        if (current.state === "URL_TO_RENDER") {
-          const sd = current.stateDetails as
-            | { url?: string; renderStrategy?: string }
-            | undefined;
-          if (sd?.url) {
-            add("sdk-call", "SDK: renderUrl (3DS / external action)", {
-              url: sd.url,
-              renderStrategy: sd.renderStrategy,
+
+        const sd = (current.stateDetails ?? {}) as Record<string, unknown>;
+        const cfg = configRef.current;
+
+        try {
+          if (current.state === "FORM_FIELDS") {
+            // Submit billing/shipping (and card accessToken) to proceed.
+            const formFields = (sd.formFields ?? {}) as {
+              card?: { accessToken?: string };
+              billing?: Array<{ name: string }>;
+              shipping?: Array<{ name: string }>;
+            };
+            const accessToken = formFields.card?.accessToken;
+
+            // Build billing/shipping payloads from what the user entered,
+            // limited to the fields the schema actually asks for.
+            const pick = (
+              schema: Array<{ name: string }> | undefined,
+              source: Record<string, string> | undefined,
+            ) => {
+              const out: Record<string, string> = {};
+              if (!schema || !source) return out;
+              for (const f of schema) {
+                const v = source[f.name];
+                if (v && v.trim()) out[f.name] = v.trim();
+              }
+              return out;
+            };
+            const billingData = pick(
+              formFields.billing,
+              cfg?.billing as unknown as Record<string, string>,
+            );
+            const shippingSrc = cfg?.shippingSameAsBilling
+              ? cfg?.billing
+              : cfg?.shipping;
+            const shippingData = pick(
+              formFields.shipping,
+              shippingSrc as unknown as Record<string, string>,
+            );
+
+            add("sdk-call", "SDK: submitForm({ intentId, accessToken, billingData, shippingData })", {
+              intentId: intentIdRef.current,
+              hasAccessToken: !!accessToken,
+              billingData,
+              shippingData,
             });
-            try {
+            current = await mh.submitForm({
+              intentId: intentIdRef.current ?? "",
+              accessToken: accessToken ?? null,
+              billingData,
+              shippingData,
+            });
+            add("response", "SDK: submitForm resolved", current);
+            continue;
+          }
+
+          if (current.state === "URL_TO_RENDER") {
+            const url = sd.url as string | undefined;
+            const renderStrategy = (sd.renderStrategy as string) || "IFRAME";
+            if (url) {
+              add("sdk-call", "SDK: renderUrl (3DS / external action)", {
+                url,
+                renderStrategy,
+              });
               current = await mh.renderUrl({
                 intentId: intentIdRef.current ?? "",
-                url: sd.url,
-                renderStrategy: sd.renderStrategy || "IFRAME",
+                url,
+                renderStrategy,
               });
               add("response", "SDK: renderUrl resolved", current);
               continue;
-            } catch (err) {
-              add("error", "renderUrl failed.", err);
-              return current;
             }
           }
+
+          if (current.state === "SAVED_CARD_CVV") {
+            // We don't have a CVV collection UI in the auto-flow; surface it.
+            add(
+              "info",
+              "Saved-card CVV is required. Collect the CVV and call submitCvv (not wired in this demo path).",
+            );
+            return current;
+          }
+
+          if (current.state === "PROCESSING") {
+            // Poll getIntentDetails until the state changes.
+            add("info", "Payment processing — polling for the result…");
+            await new Promise((r) => setTimeout(r, 2500));
+            current = await mh.getIntentDetails(intentIdRef.current ?? "");
+            add("response", "SDK: getIntentDetails (poll)", current);
+            continue;
+          }
+
+          if (current.state === "TRANSACTION_WAITING_USER_ACTION") {
+            add(
+              "info",
+              "Transaction is waiting on a user action. See intent details for the external action message.",
+            );
+            return current;
+          }
+        } catch (err) {
+          add("error", `Handling state ${current.state} failed.`, err);
+          return current;
         }
+
+        // Unknown / no-action state → stop to avoid an infinite loop.
         return current;
       }
+      add("info", "State machine reached the step limit; stopping.");
       return current;
     },
     [add],
