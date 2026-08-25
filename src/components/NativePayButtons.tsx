@@ -59,33 +59,21 @@ export default function NativePayButtons({
   const apple = express.find((m) => m.id === "APPLE_PAY");
 
   // Render the official Google Pay button web component.
+  // Render the official Google Pay button via Google's PaymentsClient.
   useEffect(() => {
     if (!google?.nativePayData || !googleRef.current) return;
     const data = google.nativePayData;
     let cancelled = false;
 
     loadScript("https://pay.google.com/gp/p/js/pay.js")
-      .then(() =>
-        import(
-          // @ts-expect-error — no types for the CDN element
-          "https://unpkg.com/@google-pay/button-element@latest/dist/index.js"
-        ).catch(() => {
-          // Fallback: the button-element may already be defined via pay.js flow.
-        }),
-      )
       .then(() => {
         if (cancelled || !googleRef.current) return;
-        googleRef.current.innerHTML = "";
-        const btn = document.createElement("google-pay-button") as HTMLElement & {
-          paymentRequest?: unknown;
-        };
-        btn.setAttribute(
-          "environment",
-          environment === "production" ? "PRODUCTION" : "TEST",
-        );
-        btn.setAttribute("button-type", "pay");
-        btn.setAttribute("button-color", "black");
-        (btn as unknown as { paymentRequest: unknown }).paymentRequest = {
+        // @ts-expect-error google global provided by pay.js
+        const paymentsClient = new google.payments.api.PaymentsClient({
+          environment: environment === "production" ? "PRODUCTION" : "TEST",
+        });
+
+        const paymentDataRequest = {
           apiVersion: 2,
           apiVersionMinor: 0,
           allowedPaymentMethods: [
@@ -111,23 +99,29 @@ export default function NativePayButtons({
           },
           transactionInfo: {
             totalPriceStatus: "FINAL",
-            totalPriceLabel: "Total",
             totalPrice: `${data.amount}`,
             currencyCode: data.currency_code,
             countryCode: data.country_code || "AE",
           },
           emailRequired: true,
         };
-        btn.addEventListener("loadpaymentdata", (event: Event) => {
-          const detail = (event as CustomEvent).detail;
-          const token = detail?.paymentMethodData?.tokenizationData?.token;
-          const email = detail?.email;
-          onGoogleToken({
-            receipt: token,
-            receiptBillingData: { email },
-          });
+
+        const button = paymentsClient.createButton({
+          buttonColor: "black",
+          buttonType: "pay",
+          buttonSizeMode: "fill",
+          onClick: () => {
+            paymentsClient
+              .loadPaymentData(paymentDataRequest)
+              .then((paymentData: { paymentMethodData?: { tokenizationData?: { token?: string } }; email?: string }) => {
+                const token = paymentData?.paymentMethodData?.tokenizationData?.token;
+                onGoogleToken({ receipt: token, receiptBillingData: { email: paymentData?.email } });
+              })
+              .catch(() => { /* sheet closed */ });
+          },
         });
-        googleRef.current.appendChild(btn);
+        googleRef.current.innerHTML = "";
+        googleRef.current.appendChild(button);
       })
       .catch(() => {
         if (googleRef.current) {
@@ -136,9 +130,7 @@ export default function NativePayButtons({
         }
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [google, environment, onGoogleToken]);
 
   // Apple Pay — only render on Safari/Apple devices that support it.
