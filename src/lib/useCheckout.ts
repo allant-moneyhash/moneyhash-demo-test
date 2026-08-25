@@ -53,6 +53,7 @@ interface AnyMoneyHash {
   };
   submitPaymentReceipt: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
   validateApplePayMerchantSession: (o: Record<string, unknown>) => Promise<unknown>;
+  renderForm: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
 }
 
 let counter = 0;
@@ -375,34 +376,6 @@ export function useCheckout() {
   // proceedWith selects the method and establishes the intent session on the
   // backend, so the subsequent cardForm.pay is authenticated. Without it, pay
   // fails with "Valid intent secret is required."
-  const prepareCardIntent = useCallback(
-    async (mh: AnyMoneyHash, intentId: string): Promise<boolean> => {
-      try {
-        add("sdk-call", "SDK: getMethods({ intentId })", { intentId });
-        const res = await mh.getMethods({ intentId });
-        add("response", "SDK: methods for intent", res);
-      } catch (err) {
-        add("error", "getMethods({ intentId }) failed.", err);
-        return false;
-      }
-      try {
-        add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id:'CARD' })", {
-          intentId,
-        });
-        const details = await mh.proceedWith({
-          intentId,
-          type: "method",
-          id: "CARD",
-        });
-        add("response", "SDK: proceedWith(CARD) returned", details);
-        return true;
-      } catch (err) {
-        add("error", "proceedWith(CARD) failed.", err);
-        return false;
-      }
-    },
-    [add],
-  );
 
   // Enrich the payload once, shared by all flows.
   const parsePayload = useCallback(
@@ -495,96 +468,31 @@ export function useCheckout() {
   );
 
   const renderCardAndPay = useCallback(
-    async (mh: AnyMoneyHash, config: DemoConfig, intentId: string) => {
+    async (mh: AnyMoneyHash, _config: DemoConfig, intentId: string) => {
       const stage = stageRef.current;
       if (!stage) {
         add("error", "Checkout stage not ready.");
         return;
       }
-      stage.innerHTML = `
-        <div style="width:100%;font-family:var(--sans)">
-          <div style="font-size:13px;font-weight:600;margin-bottom:16px;text-transform:uppercase;letter-spacing:0.06em;color:#0C1E3D">Card details</div>
-          <label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">Card number</label>
-          <div id="mh-card-number" style="height:48px;border:1px solid #d9dee6;margin-bottom:16px;padding:0 12px;background:#fff"></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
-            <div><label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">Expiry month</label>
-              <div id="mh-card-exp-month" style="height:48px;border:1px solid #d9dee6;padding:0 12px;background:#fff"></div></div>
-            <div><label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">Expiry year</label>
-              <div id="mh-card-exp-year" style="height:48px;border:1px solid #d9dee6;padding:0 12px;background:#fff"></div></div>
-            <div><label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">CVV</label>
-              <div id="mh-card-cvv" style="height:48px;border:1px solid #d9dee6;padding:0 12px;background:#fff"></div></div>
-          </div>
-          <label style="font-size:11px;color:#5a6577;display:block;margin-bottom:6px">Card holder name (optional)</label>
-          <div id="mh-card-holder" style="height:48px;border:1px solid #d9dee6;margin-bottom:20px;padding:0 12px;background:#fff"></div>
-          <button id="mh-pay-btn" style="width:100%;padding:14px;border:1px solid #0C1E3D;background:#0C1E3D;color:#fff;font-weight:600;font-size:14px;cursor:pointer">Pay now</button>
-          <div id="rendered-url-iframe-container" style="margin-top:20px"></div>
-        </div>`;
-
-      add("sdk-call", "SDK: elements() + create card fields", {
-        fields: [
-          "cardNumber",
-          "cardExpiryMonth",
-          "cardExpiryYear",
-          "cardCvv",
-          "cardHolderName",
-        ],
-      });
-
-      const elements = mh.elements({
-        styles: { fontSize: "14px", padding: "10px" },
-      });
-      const mk = (
-        elementType: string,
-        selector: string,
-        placeholder: string,
-      ) => {
-        const el = elements.create({
-          elementType,
-          elementOptions: { selector, placeholder },
+      // Use renderForm: it loads the MoneyHash embed for this intent, whose URL
+      // carries mh_intent_secret, so it authenticates correctly even when the
+      // account enforces intent-secret auth. It resolves via onComplete/onFail.
+      stage.innerHTML = '<div id="mh-render-form" style="width:100%"></div>';
+      add("sdk-call", "SDK: renderForm({ selector, intentId })", { intentId });
+      try {
+        const details = await mh.renderForm({
+          selector: "#mh-render-form",
+          intentId,
         });
-        el.mount();
-      };
-      mk("cardNumber", "#mh-card-number", "1234 5678 9012 3456");
-      mk("cardExpiryMonth", "#mh-card-exp-month", "MM");
-      mk("cardExpiryYear", "#mh-card-exp-year", "YY");
-      mk("cardCvv", "#mh-card-cvv", "123");
-      mk("cardHolderName", "#mh-card-holder", "Name on card");
-
-      const payBtn = stage.querySelector("#mh-pay-btn") as HTMLButtonElement;
-      if (payBtn) {
-        payBtn.onclick = async () => {
-          payBtn.disabled = true;
-          payBtn.textContent = "Processing…";
-          try {
-            add("sdk-call", "SDK: cardForm.collect()");
-            const t0 = performance.now();
-            const cardData = await mh.cardForm.collect();
-            add("response", "SDK: card data collected", cardData, {
-              durationMs: Math.round(performance.now() - t0),
-            });
-            const saveCard = config.scenarioId === "save-card";
-            add(
-              "sdk-call",
-              "SDK: cardForm.pay({ intentId, cardData, saveCard })",
-              { intentId, saveCard },
-            );
-            const t1 = performance.now();
-            let details = await mh.cardForm.pay({ intentId, cardData, saveCard });
-            add("response", "SDK: pay returned", details, {
-              durationMs: Math.round(performance.now() - t1),
-            });
-            details = await handleState(mh, details);
-            const oc = outcomeForState(details.state);
-            if (oc) {
-              setOutcome(oc);
-              setPhase("done");
-            }
-          } catch (err) {
-            add("error", "Card payment failed.", err);
-            payBtn.disabled = false;
-            payBtn.textContent = "Pay now";
-          }
-        };
+        add("response", "SDK: renderForm resolved", details);
+        const final = await handleState(mh, details);
+        const oc = outcomeForState(final.state) || outcomeForState(details.state);
+        if (oc) {
+          setOutcome(oc);
+          setPhase("done");
+        }
+      } catch (err) {
+        add("error", "renderForm failed.", err);
       }
     },
     [add, handleState],
@@ -709,8 +617,7 @@ export function useCheckout() {
 
       const sel = selectedMethodRef.current;
       if (selectedMethodId === "CARD" && (!sel || sel.kind === "method")) {
-        const ok = await prepareCardIntent(mh, created.intentId);
-        if (ok) await renderCardAndPay(mh, config, created.intentId);
+        await renderCardAndPay(mh, config, created.intentId);
       } else if (sel) {
         await proceedNonCard(mh, sel, created.intentId);
       } else {
@@ -723,7 +630,6 @@ export function useCheckout() {
       selectedMethodId,
       parsePayload,
       createIntent,
-      prepareCardIntent,
       renderCardAndPay,
       proceedNonCard,
       handleState,
@@ -833,24 +739,7 @@ export function useCheckout() {
         setBusy(true);
         setPhase("running");
         if (methodId === "CARD" && method.kind === "method") {
-          // getMethods({intentId}) already ran in startPayment; still need
-          // proceedWith(CARD) to establish the session before pay.
-          add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id:'CARD' })", {
-            intentId: intentIdRef.current,
-          });
-          try {
-            const d = await mh.proceedWith({
-              intentId: intentIdRef.current,
-              type: "method",
-              id: "CARD",
-            });
-            add("response", "SDK: proceedWith(CARD) returned", d);
-            await renderCardAndPay(mh, config, intentIdRef.current);
-          } catch (err) {
-            add("error", "proceedWith(CARD) failed.", err);
-            setBusy(false);
-            return;
-          }
+          await renderCardAndPay(mh, config, intentIdRef.current);
         } else {
           await proceedNonCard(mh, method, intentIdRef.current);
         }
