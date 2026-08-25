@@ -206,6 +206,12 @@ export function useCheckout() {
   // Clears just the inspector log, leaving the current run/state intact.
   const clearLog = useCallback(() => setLog([]), []);
 
+  // Public logging helper for child components (e.g. native pay buttons).
+  const logInfo = useCallback(
+    (msg: string, body?: unknown) => add("info", msg, body),
+    [add],
+  );
+
   const createIntent = useCallback(
     async (
       config: DemoConfig,
@@ -890,6 +896,7 @@ export function useCheckout() {
     expressMethods,
     submitNativeReceipt,
     validateApplePay,
+    logInfo,
   };
 }
 

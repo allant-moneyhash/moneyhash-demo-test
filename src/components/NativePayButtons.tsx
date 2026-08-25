@@ -22,58 +22,50 @@ interface ExpressMethod {
   nativePayData?: NativePayData | null;
 }
 
-// Load a script once.
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
-    const s = document.createElement("script");
-    s.src = src;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(s);
-  });
-}
-
 export default function NativePayButtons({
   express,
   environment,
   onGoogleToken,
   onAppleReceipt,
   onValidateApple,
+  onLog,
 }: {
   express: ExpressMethod[];
   environment: "sandbox" | "production";
   onGoogleToken: (receipt: Record<string, unknown>) => void;
   onAppleReceipt: (receipt: Record<string, unknown>) => void;
-  onValidateApple: (
-    methodId: string,
-    validationUrl: string,
-  ) => Promise<unknown>;
+  onValidateApple: (methodId: string, validationUrl: string) => Promise<unknown>;
+  onLog?: (msg: string, body?: unknown) => void;
 }) {
   const googleRef = useRef<HTMLDivElement>(null);
   const google = express.find((m) => m.id === "GOOGLE_PAY");
   const apple = express.find((m) => m.id === "APPLE_PAY");
 
-  // Render the official Google Pay button web component.
-  // Render the official Google Pay button via Google's PaymentsClient.
   useEffect(() => {
     if (!google?.nativePayData || !googleRef.current) return;
     const data = google.nativePayData;
     let cancelled = false;
+    onLog?.("Google Pay: loading button element", { nativePayData: data });
 
-    loadScript("https://pay.google.com/gp/p/js/pay.js")
+    import("@google-pay/button-element")
       .then(() => {
         if (cancelled || !googleRef.current) return;
-        // @ts-expect-error google global provided by pay.js
-        const paymentsClient = new google.payments.api.PaymentsClient({
-          environment: environment === "production" ? "PRODUCTION" : "TEST",
-        });
+        onLog?.("Google Pay: button element loaded, rendering");
+        googleRef.current.innerHTML = "";
 
-        const paymentDataRequest = {
+        const btn = document.createElement("google-pay-button") as HTMLElement & {
+          paymentRequest?: unknown;
+        };
+        btn.setAttribute(
+          "environment",
+          environment === "production" ? "PRODUCTION" : "TEST",
+        );
+        btn.setAttribute("button-type", "pay");
+        btn.setAttribute("button-color", "black");
+        btn.setAttribute("button-size-mode", "fill");
+        btn.style.width = "100%";
+
+        (btn as unknown as { paymentRequest: unknown }).paymentRequest = {
           apiVersion: 2,
           apiVersionMinor: 0,
           allowedPaymentMethods: [
@@ -99,6 +91,7 @@ export default function NativePayButtons({
           },
           transactionInfo: {
             totalPriceStatus: "FINAL",
+            totalPriceLabel: "Total",
             totalPrice: `${data.amount}`,
             currencyCode: data.currency_code,
             countryCode: data.country_code || "AE",
@@ -106,34 +99,34 @@ export default function NativePayButtons({
           emailRequired: true,
         };
 
-        const button = paymentsClient.createButton({
-          buttonColor: "black",
-          buttonType: "pay",
-          buttonSizeMode: "fill",
-          onClick: () => {
-            paymentsClient
-              .loadPaymentData(paymentDataRequest)
-              .then((paymentData: { paymentMethodData?: { tokenizationData?: { token?: string } }; email?: string }) => {
-                const token = paymentData?.paymentMethodData?.tokenizationData?.token;
-                onGoogleToken({ receipt: token, receiptBillingData: { email: paymentData?.email } });
-              })
-              .catch(() => { /* sheet closed */ });
-          },
+        btn.addEventListener("loadpaymentdata", (event: Event) => {
+          const detail = (event as CustomEvent).detail;
+          const token = detail?.paymentMethodData?.tokenizationData?.token;
+          const email = detail?.email;
+          onLog?.("Google Pay: token received");
+          onGoogleToken({ receipt: token, receiptBillingData: { email } });
         });
-        googleRef.current.innerHTML = "";
-        googleRef.current.appendChild(button);
+        btn.addEventListener("cancel", () => onLog?.("Google Pay: sheet cancelled"));
+        btn.addEventListener("readytopaychange", (e: Event) => {
+          const ready = (e as CustomEvent).detail?.isReadyToPay;
+          onLog?.(`Google Pay: isReadyToPay = ${ready}`);
+        });
+
+        googleRef.current.appendChild(btn);
       })
-      .catch(() => {
+      .catch((err) => {
+        onLog?.("Google Pay: failed to load button element", { error: String(err) });
         if (googleRef.current) {
           googleRef.current.innerHTML =
             '<div style="font-size:12px;color:#5a6577">Google Pay could not load in this browser.</div>';
         }
       });
 
-    return () => { cancelled = true; };
-  }, [google, environment, onGoogleToken]);
+    return () => {
+      cancelled = true;
+    };
+  }, [google, environment, onGoogleToken, onLog]);
 
-  // Apple Pay — only render on Safari/Apple devices that support it.
   const appleSupported =
     typeof window !== "undefined" &&
     // @ts-expect-error ApplePaySession is only on Safari
@@ -144,13 +137,13 @@ export default function NativePayButtons({
   function startApplePay() {
     if (!apple?.nativePayData) return;
     const data = apple.nativePayData;
+    onLog?.("Apple Pay: starting session");
     // @ts-expect-error Safari-only global
     const session = new window.ApplePaySession(3, {
       countryCode: data.country_code || "AE",
       currencyCode: data.currency_code,
       supportedNetworks: (data.supported_networks ||
-        data.allowed_card_networks ||
-        ["visa", "masterCard"]) as string[],
+        data.allowed_card_networks || ["visa", "masterCard"]) as string[],
       merchantCapabilities: ["supports3DS"],
       total: { label: data.merchant_name || "Total", type: "final", amount: `${data.amount}` },
       requiredShippingContactFields: ["email"],
@@ -187,18 +180,9 @@ export default function NativePayButtons({
             onClick={startApplePay}
             aria-label="Pay with Apple Pay"
             style={{
-              width: "100%",
-              height: 44,
-              background: "#000",
-              color: "#fff",
-              border: "none",
-              fontSize: 16,
-              fontWeight: 600,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 6,
+              width: "100%", height: 44, background: "#000", color: "#fff",
+              border: "none", fontSize: 16, fontWeight: 600, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
             }}
           >
              Pay
@@ -213,12 +197,8 @@ export default function NativePayButtons({
 
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          margin: "16px 0 4px",
-          color: "var(--text-soft)",
-          fontSize: 12,
+          display: "flex", alignItems: "center", gap: 12, margin: "16px 0 4px",
+          color: "var(--text-soft)", fontSize: 12,
         }}
       >
         <span style={{ flex: 1, height: 1, background: "var(--edge)" }} />

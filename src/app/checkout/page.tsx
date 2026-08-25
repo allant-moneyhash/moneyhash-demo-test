@@ -17,7 +17,7 @@ export default function CheckoutWizard() {
   const {
     log, busy, outcome, phase, methods, selectedMethodId,
     setStage, loadMethods, payNow, startPayment, selectMethod, reset, clearLog,
-    expressMethods, submitNativeReceipt, validateApplePay,
+    expressMethods, submitNativeReceipt, validateApplePay, logInfo,
   } = useCheckout();
   const [payloadEdited, setPayloadEdited] = useState(false);
 
@@ -167,6 +167,7 @@ export default function CheckoutWizard() {
                     onGoogleToken={(receipt) => submitNativeReceipt(config, "GOOGLE_PAY", receipt)}
                     onAppleReceipt={(receipt) => submitNativeReceipt(config, "APPLE_PAY", receipt)}
                     onValidateApple={(methodId, url) => validateApplePay(config, methodId, url)}
+                    onLog={logInfo}
                   />
                 )}
               </>
