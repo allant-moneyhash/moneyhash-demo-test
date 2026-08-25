@@ -5,7 +5,7 @@ import {
   INTEGRATION_TYPES,
   IntegrationType,
 } from "@/lib/types";
-import { SCENARIOS, getScenario } from "@/lib/scenarios";
+import { getScenario } from "@/lib/scenarios";
 import BillingShipping from "@/components/BillingShipping";
 
 const label: React.CSSProperties = {
@@ -70,28 +70,25 @@ export default function StepScenario({
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
-        {/* Left column: scenario + integration */}
+        {/* Left column: integration */}
         <div>
           <div style={{ marginBottom: 22 }}>
-            <label style={label} htmlFor="scenario">Payment scenario</label>
-            <select id="scenario" value={config.scenarioId}
-              onChange={(e) => onScenarioChange(e.target.value)}
-              style={{ ...input, cursor: "pointer", fontFamily: "var(--sans)" }}>
-              {SCENARIOS.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}{s.ready ? "" : " (preview)"}</option>
-              ))}
-            </select>
+            <span style={label}>Payment scenario</span>
+            <div
+              style={{
+                padding: "11px 12px",
+                border: "1px solid var(--edge)",
+                background: "var(--surface)",
+                fontSize: 13,
+                color: "var(--navy)",
+                fontWeight: 600,
+              }}
+            >
+              {scenario.name}
+            </div>
             <p style={{ margin: "7px 0 0", fontSize: 12, color: "var(--text-soft)", lineHeight: 1.4 }}>
               {scenario.blurb}
             </p>
-            {scenario.fields.map((f) => (
-              <div key={f.key} style={{ marginTop: 12 }}>
-                <label style={{ ...label, textTransform: "none", letterSpacing: 0 }}>{f.label}</label>
-                <input style={input} value={config.scenarioValues[f.key] ?? ""}
-                  onChange={(e) => onChange({ scenarioValues: { ...config.scenarioValues, [f.key]: e.target.value } })}
-                  placeholder={f.placeholder} autoComplete="off" spellCheck={false} />
-              </div>
-            ))}
           </div>
 
           <div style={{ marginBottom: 22 }}>

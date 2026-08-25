@@ -40,12 +40,22 @@ export default function NativePayButtons({
   const googleRef = useRef<HTMLDivElement>(null);
   const google = express.find((m) => m.id === "GOOGLE_PAY");
   const apple = express.find((m) => m.id === "APPLE_PAY");
+  const renderedRef = useRef(false);
+
+  // Stable key so the effect only re-runs when the actual Google Pay data
+  // changes — NOT on every render (express.find returns a new object each
+  // render, which previously caused an infinite render/log loop).
+  const googleKey = google?.nativePayData
+    ? JSON.stringify(google.nativePayData)
+    : "";
 
   useEffect(() => {
-    if (!google?.nativePayData || !googleRef.current) return;
-    const data = google.nativePayData;
+    if (!googleKey || !googleRef.current) return;
+    if (renderedRef.current) return; // render only once
+    renderedRef.current = true;
+    const data = JSON.parse(googleKey) as NativePayData;
     let cancelled = false;
-    onLog?.("Google Pay: loading button element", { nativePayData: data });
+    onLog?.("Google Pay: loading button element");
 
     import("@google-pay/button-element")
       .then(() => {
@@ -125,7 +135,21 @@ export default function NativePayButtons({
     return () => {
       cancelled = true;
     };
-  }, [google, environment, onGoogleToken, onLog]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleKey, environment]);
+
+  // Load Apple Pay JS SDK (per MoneyHash docs) when an Apple Pay method exists.
+  useEffect(() => {
+    if (!apple?.nativePayData) return;
+    const src = "https://applepay.cdn-apple.com/jsapi/1.latest/apple-pay-sdk.js";
+    if (document.querySelector(`script[src="${src}"]`)) return;
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.crossOrigin = "anonymous";
+    document.head.appendChild(s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apple?.id]);
 
   const appleSupported =
     typeof window !== "undefined" &&
@@ -164,6 +188,7 @@ export default function NativePayButtons({
       session.completePayment(window.ApplePaySession.STATUS_SUCCESS);
       onAppleReceipt(receipt);
     };
+    session.oncancel = () => onLog?.("Apple Pay: sheet closed");
     session.begin();
   }
 
@@ -178,7 +203,8 @@ export default function NativePayButtons({
         {apple?.nativePayData && appleSupported && (
           <button
             onClick={startApplePay}
-            aria-label="Pay with Apple Pay"
+            aria-label="Buy with Apple Pay"
+            className="apple-pay-button-official"
             style={{
               width: "100%", height: 44, background: "#000", color: "#fff",
               border: "none", fontSize: 16, fontWeight: 600, cursor: "pointer",

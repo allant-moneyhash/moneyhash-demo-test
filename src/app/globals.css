@@ -67,3 +67,10 @@ body {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Official Apple Pay button (renders on Safari/Apple devices that support it) */
+.apple-pay-button-official {
+  -webkit-appearance: -apple-pay-button;
+  -apple-pay-button-type: buy;
+  -apple-pay-button-style: black;
+}
