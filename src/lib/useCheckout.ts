@@ -212,6 +212,38 @@ export function useCheckout() {
   // Clears just the inspector log, leaving the current run/state intact.
   const clearLog = useCallback(() => setLog([]), []);
 
+  // Navigate to the /result page for a terminal outcome, so SDK/native flows
+  // land on the same success/fail page as the embed redirect flows.
+  const goToResult = useCallback((outcomeKind: Outcome) => {
+    if (!outcomeKind) return;
+    const statusMap: Record<string, string> = {
+      success: "SUCCESS",
+      failed: "FAILED",
+      cancelled: "CANCELLED",
+      pending: "PENDING",
+    };
+    const status = statusMap[outcomeKind] || "PENDING";
+    const intentId = intentIdRef.current ?? "";
+    const params = new URLSearchParams({ status, intent_id: intentId });
+    if (typeof window !== "undefined") {
+      // Small delay so the final inspector lines are visible before leaving.
+      setTimeout(() => {
+        window.location.href = `/result?${params.toString()}`;
+      }, 1200);
+    }
+  }, []);
+
+  // Set a terminal outcome and navigate to the result page.
+  const finish = useCallback(
+    (oc: Outcome) => {
+      if (!oc) return;
+      setOutcome(oc);
+      setPhase("done");
+      goToResult(oc);
+    },
+    [goToResult],
+  );
+
   // Public logging helper for child components (e.g. native pay buttons).
   const logInfo = useCallback(
     (msg: string, body?: unknown) => add("info", msg, body),
@@ -346,19 +378,17 @@ export function useCheckout() {
         publicApiKey: config.publicApiKey,
         onComplete: (event: unknown) => {
           add("sdk-state", "onComplete fired", event);
-          setOutcome("success");
-          setPhase("done");
+          finish("success");
         },
         onFail: (event: unknown) => {
           add("sdk-state", "onFail fired", event);
-          setOutcome("failed");
-          setPhase("done");
+          finish("failed");
         },
       });
       mhRef.current = mh;
       return mh;
     },
-    [add],
+    [add, finish],
   );
 
   const handleState = useCallback(
@@ -560,10 +590,7 @@ export function useCheckout() {
         add("response", "SDK: submitPaymentReceipt returned", details);
         const final = await handleState(mh, details);
         const oc = outcomeForState(final.state);
-        if (oc) {
-          setOutcome(oc);
-          setPhase("done");
-        }
+        if (oc) finish(oc);
       } catch (err) {
         add("error", "Native payment failed.", err);
       }
@@ -682,15 +709,45 @@ export function useCheckout() {
             durationMs: Math.round(performance.now() - t0),
           });
           const saveCard = config.scenarioId === "save-card";
-          add("sdk-call", "SDK: cardForm.pay({ intentId, cardData, saveCard })", { intentId, saveCard });
+          // Pass billing/shipping INTO cardForm.pay (per the "Pay using Card
+          // Information" docs) so the intent gets them at pay time and doesn't
+          // bounce back to FORM_FIELDS asking for them.
+          const buildContact = (c?: Record<string, string>) => {
+            const out: Record<string, string> = {};
+            if (!c) return out;
+            for (const [k, v] of Object.entries(c)) {
+              if (v && String(v).trim()) out[k] = String(v).trim();
+            }
+            return out;
+          };
+          const billingData = buildContact(
+            config.billing as unknown as Record<string, string>,
+          );
+          const shippingData = buildContact(
+            (config.shippingSameAsBilling
+              ? config.billing
+              : config.shipping) as unknown as Record<string, string>,
+          );
+          add("sdk-call", "SDK: cardForm.pay({ intentId, cardData, billingData, shippingData, saveCard })", {
+            intentId,
+            saveCard,
+            billingData,
+            shippingData,
+          });
           const t1 = performance.now();
-          let details = await mh.cardForm.pay({ intentId, cardData, saveCard });
+          let details = await mh.cardForm.pay({
+            intentId,
+            cardData,
+            billingData,
+            shippingData,
+            saveCard,
+          });
           add("response", "SDK: pay returned", details, {
             durationMs: Math.round(performance.now() - t1),
           });
           details = await handleState(mh, details);
           const oc = outcomeForState(details.state);
-          if (oc) { setOutcome(oc); setPhase("done"); }
+            if (oc) finish(oc);
         } catch (err) {
           add("error", "Card payment failed.", err);
           const btn2 = stage.querySelector("#mh-pay-btn") as HTMLButtonElement | null;
@@ -734,10 +791,7 @@ export function useCheckout() {
         add("response", "SDK: proceedWith returned", details);
         const final = await handleState(mh, details);
         const oc = outcomeForState(final.state);
-        if (oc) {
-          setOutcome(oc);
-          setPhase("done");
-        }
+        if (oc) finish(oc);
       } catch (err) {
         add("error", "proceedWith failed.", err);
       }

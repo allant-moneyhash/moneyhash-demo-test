@@ -18,7 +18,27 @@ const input: React.CSSProperties = {
   color: "var(--text)",
 };
 
-const FIELDS: { key: keyof ContactDetails; label: string; half?: boolean }[] = [
+const COUNTRIES: { code: string; name: string }[] = [
+  { code: "AE", name: "United Arab Emirates" },
+  { code: "SA", name: "Saudi Arabia" },
+  { code: "EG", name: "Egypt" },
+  { code: "IE", name: "Ireland" },
+  { code: "GB", name: "United Kingdom" },
+  { code: "US", name: "United States" },
+  { code: "FR", name: "France" },
+  { code: "DE", name: "Germany" },
+  { code: "ES", name: "Spain" },
+  { code: "IT", name: "Italy" },
+  { code: "NL", name: "Netherlands" },
+  { code: "IN", name: "India" },
+  { code: "PK", name: "Pakistan" },
+  { code: "NG", name: "Nigeria" },
+  { code: "ZA", name: "South Africa" },
+  { code: "CA", name: "Canada" },
+  { code: "AU", name: "Australia" },
+];
+
+const FIELDS: { key: keyof ContactDetails; label: string; half?: boolean; type?: "text" | "select" }[] = [
   { key: "first_name", label: "First name", half: true },
   { key: "last_name", label: "Last name", half: true },
   { key: "email", label: "Email", half: true },
@@ -26,7 +46,7 @@ const FIELDS: { key: keyof ContactDetails; label: string; half?: boolean }[] = [
   { key: "address", label: "Address" },
   { key: "city", label: "City", half: true },
   { key: "state", label: "State", half: true },
-  { key: "country", label: "Country (ISO-2, e.g. AE)", half: true },
+  { key: "country", label: "Country", half: true, type: "select" },
   { key: "postal_code", label: "Postal code", half: true },
 ];
 
@@ -42,13 +62,28 @@ function ContactForm({
       {FIELDS.map((f) => (
         <div key={f.key} style={{ gridColumn: f.half ? "auto" : "1 / -1" }}>
           <label style={label}>{f.label}</label>
-          <input
-            style={input}
-            value={value[f.key]}
-            onChange={(e) => onChange({ [f.key]: e.target.value })}
-            autoComplete="off"
-            spellCheck={false}
-          />
+          {f.type === "select" ? (
+            <select
+              style={{ ...input, cursor: "pointer" }}
+              value={value[f.key]}
+              onChange={(e) => onChange({ [f.key]: e.target.value })}
+            >
+              <option value="">Select country…</option>
+              {COUNTRIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              style={input}
+              value={value[f.key]}
+              onChange={(e) => onChange({ [f.key]: e.target.value })}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          )}
         </div>
       ))}
     </div>
