@@ -34,7 +34,7 @@ export default function Header({
           padding: "2px 7px",
         }}
       >
-        v21
+        v22
       </span>
 
       {step !== undefined && (

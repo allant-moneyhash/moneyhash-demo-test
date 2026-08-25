@@ -159,6 +159,10 @@ export function useCheckout() {
   const configRef = useRef<DemoConfig | null>(null);
   const intentIdRef = useRef<string | null>(null);
   const intentSecretRef = useRef<string | null>(null);
+  // Card FORM_FIELDS details captured from proceedWith(CARD), used by submitForm.
+  const cardAccessTokenRef = useRef<string | null>(null);
+  const billingSchemaRef = useRef<Array<{ name: string }> | null>(null);
+  const shippingSchemaRef = useRef<Array<{ name: string }> | null>(null);
   // The isolated DOM node the SDK/iframe render into (set by the page via ref).
   const stageRef = useRef<HTMLElement | null>(null);
 
@@ -208,6 +212,9 @@ export function useCheckout() {
     selectedMethodRef.current = null;
     intentIdRef.current = null;
     intentSecretRef.current = null;
+    cardAccessTokenRef.current = null;
+    billingSchemaRef.current = null;
+    shippingSchemaRef.current = null;
     mhRef.current = null;
     clearStage();
   }, [clearStage]);
@@ -659,6 +666,24 @@ export function useCheckout() {
         add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id:'CARD' })", { intentId });
         const d = await mh.proceedWith({ intentId, type: "method", id: "CARD" });
         add("response", "SDK: proceedWith(CARD) returned", d);
+
+        // Capture the FORM_FIELDS accessToken + billing/shipping schemas.
+        // submitForm needs the accessToken (5-min TTL) from here.
+        const sd = (d.stateDetails ?? {}) as {
+          formFields?: {
+            card?: { accessToken?: string };
+            billing?: Array<{ name: string }>;
+            shipping?: Array<{ name: string }>;
+          };
+        };
+        cardAccessTokenRef.current = sd.formFields?.card?.accessToken ?? null;
+        billingSchemaRef.current = sd.formFields?.billing ?? null;
+        shippingSchemaRef.current = sd.formFields?.shipping ?? null;
+        add("info", "Captured card form details", {
+          hasAccessToken: !!cardAccessTokenRef.current,
+          billingFields: (billingSchemaRef.current ?? []).map((f) => f.name),
+          shippingFields: (shippingSchemaRef.current ?? []).map((f) => f.name),
+        });
         return true;
       } catch (err) {
         add("error", "proceedWith(CARD) failed.", err);
@@ -720,69 +745,72 @@ export function useCheckout() {
         paying = true;
         // Always log the click first, so we can see it register even if a
         // later step throws.
-        add("info", "Pay button clicked — collecting card data…");
+        add("info", "Pay button clicked — submitting card form…");
         const btn = stage.querySelector("#mh-pay-btn") as HTMLButtonElement | null;
         if (btn) {
           btn.disabled = true;
           btn.textContent = "Processing…";
         }
         try {
-          add("sdk-call", "SDK: cardForm.collect()");
-          const t0 = performance.now();
-          const cardData = await mh.cardForm.collect();
-          add("response", "SDK: card data collected", cardData, {
-            durationMs: Math.round(performance.now() - t0),
-          });
           const saveCard = config.scenarioId === "save-card";
-          // Only include billing/shipping when the selected method actually
-          // requires them. MoneyHash rejects shipping data ("must be empty")
-          // when the method doesn't require shipping.
-          const method = selectedMethodRef.current;
-          const needsBilling =
-            Array.isArray(method?.requiredBillingFields) &&
-            (method!.requiredBillingFields as unknown[]).length > 0;
-          const needsShipping =
-            Array.isArray(method?.requiredShippingFields) &&
-            (method!.requiredShippingFields as unknown[]).length > 0;
+          const accessToken = cardAccessTokenRef.current;
+          if (!accessToken) {
+            add("error", "No card accessToken captured from FORM_FIELDS. Cannot submit.");
+            if (btn) { btn.disabled = false; btn.textContent = "Pay now"; }
+            paying = false;
+            return;
+          }
 
-          const buildContact = (c?: Record<string, string>) => {
+          // Build billing/shipping ONLY for the fields the FORM_FIELDS schema
+          // asked for (keyed by Field.name). If the schema is empty, omit them.
+          const pick = (
+            schema: Array<{ name: string }> | null,
+            source: Record<string, string> | undefined,
+          ) => {
             const out: Record<string, string> = {};
-            if (!c) return out;
-            for (const [k, v] of Object.entries(c)) {
-              if (v && String(v).trim()) out[k] = String(v).trim();
+            if (!schema || !schema.length || !source) return out;
+            for (const f of schema) {
+              const v = source[f.name];
+              if (v && String(v).trim()) out[f.name] = String(v).trim();
             }
             return out;
           };
+          const billingData = pick(
+            billingSchemaRef.current,
+            config.billing as unknown as Record<string, string>,
+          );
+          const shippingData = pick(
+            shippingSchemaRef.current,
+            (config.shippingSameAsBilling
+              ? config.billing
+              : config.shipping) as unknown as Record<string, string>,
+          );
 
-          const payArgs: Record<string, unknown> = { intentId, cardData, saveCard };
-          if (needsBilling) {
-            payArgs.billingData = buildContact(
-              config.billing as unknown as Record<string, string>,
-            );
-          }
-          if (needsShipping) {
-            payArgs.shippingData = buildContact(
-              (config.shippingSameAsBilling
-                ? config.billing
-                : config.shipping) as unknown as Record<string, string>,
-            );
-          }
-          add("sdk-call", "SDK: cardForm.pay(...)", {
+          const submitArgs: Record<string, unknown> = {
             intentId,
+            accessToken,
             saveCard,
-            billingIncluded: needsBilling,
-            shippingIncluded: needsShipping,
+          };
+          if (Object.keys(billingData).length) submitArgs.billingData = billingData;
+          if (Object.keys(shippingData).length) submitArgs.shippingData = shippingData;
+
+          add("sdk-call", "SDK: submitForm({ intentId, accessToken, billingData?, shippingData? })", {
+            intentId,
+            hasAccessToken: true,
+            billingData,
+            shippingData,
+            saveCard,
           });
           const t1 = performance.now();
-          let details = await mh.cardForm.pay(payArgs);
-          add("response", "SDK: pay returned", details, {
+          let details = await mh.submitForm(submitArgs);
+          add("response", "SDK: submitForm returned", details, {
             durationMs: Math.round(performance.now() - t1),
           });
           details = await handleState(mh, details);
           const oc = outcomeForState(details.state);
-            if (oc) finish(oc);
+          if (oc) finish(oc);
         } catch (err) {
-          add("error", "Card payment failed.", err);
+          add("error", "Card submitForm failed.", err);
           const btn2 = stage.querySelector("#mh-pay-btn") as HTMLButtonElement | null;
           if (btn2) { btn2.disabled = false; btn2.textContent = "Pay now"; }
         } finally {
