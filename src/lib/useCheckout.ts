@@ -17,6 +17,8 @@ interface MethodLike {
   title: string;
   icons?: string[];
   confirmationRequired?: boolean;
+  requiredBillingFields?: unknown[] | null;
+  requiredShippingFields?: unknown[] | null;
   // Which bucket this came from — determines how we proceed with it.
   kind?: "method" | "express" | "customerBalance" | "savedCard";
 }
@@ -57,6 +59,7 @@ interface AnyMoneyHash {
   setIntentSecret: (secret: string) => void;
   submitForm: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
   submitCvv: (o: Record<string, unknown>) => Promise<IntentDetailsLike>;
+  resetSelectedMethod: (intentId: string) => Promise<IntentDetailsLike>;
 }
 
 let counter = 0;
@@ -560,6 +563,24 @@ export function useCheckout() {
 
   // Complete a native pay (Google/Apple) with a receipt obtained from the
   // native sheet: select the method, then submit the receipt.
+  // Reset any previously-selected method on the intent so we can switch to a
+  // different one on the SAME intent (one intent per checkout session). This
+  // avoids "payment_method doesn't match" errors when the user tries one method
+  // then another. Safe to call even if nothing was selected.
+  const resetSelectedMethodSafe = useCallback(
+    async (mh: AnyMoneyHash, intentId: string) => {
+      try {
+        add("sdk-call", "SDK: resetSelectedMethod(intentId)", { intentId });
+        const d = await mh.resetSelectedMethod(intentId);
+        add("response", "SDK: selected method reset", d);
+      } catch (err) {
+        // Non-fatal: if nothing was selected, the API may no-op or error.
+        add("info", "resetSelectedMethod skipped/failed (non-fatal).", err);
+      }
+    },
+    [add],
+  );
+
   const submitNativeReceipt = useCallback(
     async (
       config: DemoConfig,
@@ -577,6 +598,8 @@ export function useCheckout() {
       }
       applyIntentSecret(mh);
       try {
+        // Reset any prior selection (e.g. CARD) so the native method matches.
+        await resetSelectedMethodSafe(mh, intentId);
         add("sdk-call", `SDK: proceedWith({ type:'method', id:'${methodId}' })`, {
           intentId,
           id: methodId,
@@ -596,7 +619,7 @@ export function useCheckout() {
       }
       setBusy(false);
     },
-    [add, buildSdk, ensureIntent, applyIntentSecret, handleState],
+    [add, buildSdk, ensureIntent, applyIntentSecret, resetSelectedMethodSafe, handleState, finish],
   );
 
   // Validate an Apple Pay merchant session (used by the Apple Pay button).
@@ -631,6 +654,8 @@ export function useCheckout() {
         return false;
       }
       try {
+        // Reset any prior selection so switching to CARD works on the same intent.
+        await resetSelectedMethodSafe(mh, intentId);
         add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id:'CARD' })", { intentId });
         const d = await mh.proceedWith({ intentId, type: "method", id: "CARD" });
         add("response", "SDK: proceedWith(CARD) returned", d);
@@ -640,7 +665,7 @@ export function useCheckout() {
         return false;
       }
     },
-    [add, applyIntentSecret],
+    [add, applyIntentSecret, resetSelectedMethodSafe],
   );
 
   const renderCardAndPay = useCallback(
@@ -709,9 +734,17 @@ export function useCheckout() {
             durationMs: Math.round(performance.now() - t0),
           });
           const saveCard = config.scenarioId === "save-card";
-          // Pass billing/shipping INTO cardForm.pay (per the "Pay using Card
-          // Information" docs) so the intent gets them at pay time and doesn't
-          // bounce back to FORM_FIELDS asking for them.
+          // Only include billing/shipping when the selected method actually
+          // requires them. MoneyHash rejects shipping data ("must be empty")
+          // when the method doesn't require shipping.
+          const method = selectedMethodRef.current;
+          const needsBilling =
+            Array.isArray(method?.requiredBillingFields) &&
+            (method!.requiredBillingFields as unknown[]).length > 0;
+          const needsShipping =
+            Array.isArray(method?.requiredShippingFields) &&
+            (method!.requiredShippingFields as unknown[]).length > 0;
+
           const buildContact = (c?: Record<string, string>) => {
             const out: Record<string, string> = {};
             if (!c) return out;
@@ -720,28 +753,28 @@ export function useCheckout() {
             }
             return out;
           };
-          const billingData = buildContact(
-            config.billing as unknown as Record<string, string>,
-          );
-          const shippingData = buildContact(
-            (config.shippingSameAsBilling
-              ? config.billing
-              : config.shipping) as unknown as Record<string, string>,
-          );
-          add("sdk-call", "SDK: cardForm.pay({ intentId, cardData, billingData, shippingData, saveCard })", {
+
+          const payArgs: Record<string, unknown> = { intentId, cardData, saveCard };
+          if (needsBilling) {
+            payArgs.billingData = buildContact(
+              config.billing as unknown as Record<string, string>,
+            );
+          }
+          if (needsShipping) {
+            payArgs.shippingData = buildContact(
+              (config.shippingSameAsBilling
+                ? config.billing
+                : config.shipping) as unknown as Record<string, string>,
+            );
+          }
+          add("sdk-call", "SDK: cardForm.pay(...)", {
             intentId,
             saveCard,
-            billingData,
-            shippingData,
+            billingIncluded: needsBilling,
+            shippingIncluded: needsShipping,
           });
           const t1 = performance.now();
-          let details = await mh.cardForm.pay({
-            intentId,
-            cardData,
-            billingData,
-            shippingData,
-            saveCard,
-          });
+          let details = await mh.cardForm.pay(payArgs);
           add("response", "SDK: pay returned", details, {
             durationMs: Math.round(performance.now() - t1),
           });
@@ -777,12 +810,13 @@ export function useCheckout() {
         savedCard: "savedCard",
       };
       const type = typeMap[method.kind ?? "method"] ?? "method";
-      add("sdk-call", `SDK: proceedWith({ intentId, type:'${type}', id })`, {
-        intentId,
-        type,
-        id: method.id,
-      });
       try {
+        await resetSelectedMethodSafe(mh, intentId);
+        add("sdk-call", `SDK: proceedWith({ intentId, type:'${type}', id })`, {
+          intentId,
+          type,
+          id: method.id,
+        });
         const details = await mh.proceedWith({
           intentId,
           type,
@@ -796,7 +830,7 @@ export function useCheckout() {
         add("error", "proceedWith failed.", err);
       }
     },
-    [add, handleState],
+    [add, handleState, resetSelectedMethodSafe, finish],
   );
 
   // ---- Public action 1: Load methods (methods-first only) ----
