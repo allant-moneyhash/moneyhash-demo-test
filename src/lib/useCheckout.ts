@@ -554,35 +554,50 @@ export function useCheckout() {
       mk("cardCvv", "#mh-card-cvv", "123");
       mk("cardHolderName", "#mh-card-holder", "Name on card");
 
-      const payBtn = stage.querySelector("#mh-pay-btn") as HTMLButtonElement;
-      if (payBtn) {
-        payBtn.onclick = async () => {
-          payBtn.disabled = true;
-          payBtn.textContent = "Processing…";
-          try {
-            add("sdk-call", "SDK: cardForm.collect()");
-            const t0 = performance.now();
-            const cardData = await mh.cardForm.collect();
-            add("response", "SDK: card data collected", cardData, {
-              durationMs: Math.round(performance.now() - t0),
-            });
-            const saveCard = config.scenarioId === "save-card";
-            add("sdk-call", "SDK: cardForm.pay({ intentId, cardData, saveCard })", { intentId, saveCard });
-            const t1 = performance.now();
-            let details = await mh.cardForm.pay({ intentId, cardData, saveCard });
-            add("response", "SDK: pay returned", details, {
-              durationMs: Math.round(performance.now() - t1),
-            });
-            details = await handleState(mh, details);
-            const oc = outcomeForState(details.state);
-            if (oc) { setOutcome(oc); setPhase("done"); }
-          } catch (err) {
-            add("error", "Card payment failed.", err);
-            payBtn.disabled = false;
-            payBtn.textContent = "Pay now";
-          }
-        };
-      }
+      // Attach via event delegation on the stage container so the handler
+      // fires regardless of when the button element is (re)created or if the
+      // SDK's field mounting re-touches the DOM. A direct onclick can silently
+      // fail to attach if the query runs at the wrong moment.
+      let paying = false;
+      const onStageClick = async (e: Event) => {
+        const target = e.target as HTMLElement;
+        if (!target || !target.closest("#mh-pay-btn")) return;
+        if (paying) return;
+        paying = true;
+        // Always log the click first, so we can see it register even if a
+        // later step throws.
+        add("info", "Pay button clicked — collecting card data…");
+        const btn = stage.querySelector("#mh-pay-btn") as HTMLButtonElement | null;
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Processing…";
+        }
+        try {
+          add("sdk-call", "SDK: cardForm.collect()");
+          const t0 = performance.now();
+          const cardData = await mh.cardForm.collect();
+          add("response", "SDK: card data collected", cardData, {
+            durationMs: Math.round(performance.now() - t0),
+          });
+          const saveCard = config.scenarioId === "save-card";
+          add("sdk-call", "SDK: cardForm.pay({ intentId, cardData, saveCard })", { intentId, saveCard });
+          const t1 = performance.now();
+          let details = await mh.cardForm.pay({ intentId, cardData, saveCard });
+          add("response", "SDK: pay returned", details, {
+            durationMs: Math.round(performance.now() - t1),
+          });
+          details = await handleState(mh, details);
+          const oc = outcomeForState(details.state);
+          if (oc) { setOutcome(oc); setPhase("done"); }
+        } catch (err) {
+          add("error", "Card payment failed.", err);
+          const btn2 = stage.querySelector("#mh-pay-btn") as HTMLButtonElement | null;
+          if (btn2) { btn2.disabled = false; btn2.textContent = "Pay now"; }
+        } finally {
+          paying = false;
+        }
+      };
+      stage.addEventListener("click", onStageClick);
     },
     [add, handleState],
   );
