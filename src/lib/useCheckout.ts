@@ -159,9 +159,6 @@ export function useCheckout() {
   const configRef = useRef<DemoConfig | null>(null);
   const intentIdRef = useRef<string | null>(null);
   const intentSecretRef = useRef<string | null>(null);
-  const cardAccessTokenRef = useRef<string | null>(null);
-  const billingSchemaRef = useRef<Array<{ name: string }> | null>(null);
-  const shippingSchemaRef = useRef<Array<{ name: string }> | null>(null);
   // The isolated DOM node the SDK/iframe render into (set by the page via ref).
   const stageRef = useRef<HTMLElement | null>(null);
 
@@ -211,9 +208,6 @@ export function useCheckout() {
     selectedMethodRef.current = null;
     intentIdRef.current = null;
     intentSecretRef.current = null;
-    cardAccessTokenRef.current = null;
-    billingSchemaRef.current = null;
-    shippingSchemaRef.current = null;
     mhRef.current = null;
     clearStage();
   }, [clearStage]);
@@ -264,10 +258,16 @@ export function useCheckout() {
       config: DemoConfig,
       body: Record<string, unknown>,
       baseURL: string,
+      methodId?: string,
     ) => {
+      // Repo model: create the intent WITH the selected payment_method.
+      const finalBody =
+        methodId && body.payment_method === undefined
+          ? { ...body, payment_method: methodId }
+          : body;
       add("request", "Create intent → POST /payments/intent/", {
         endpoint: `${baseURL}/payments/intent/`,
-        body,
+        body: finalBody,
       });
       const t0 = performance.now();
       try {
@@ -277,7 +277,7 @@ export function useCheckout() {
           body: JSON.stringify({
             baseURL,
             secretApiKey: config.secretApiKey,
-            body,
+            body: finalBody,
           }),
         });
         const json = await res.json();
@@ -309,7 +309,7 @@ export function useCheckout() {
         }
         intentIdRef.current = intentId;
         intentSecretRef.current = intentSecret || null;
-        return { intentId, embedUrl, intentSecret };
+        return { intentId, embedUrl, intentSecret, details: inner };
       } catch (err) {
         add("error", "Network error creating intent.", String(err));
         return null;
@@ -422,54 +422,11 @@ export function useCheckout() {
 
         try {
           if (current.state === "FORM_FIELDS") {
-            // Submit billing/shipping (and card accessToken) to proceed.
-            const formFields = (sd.formFields ?? {}) as {
-              card?: { accessToken?: string };
-              billing?: Array<{ name: string }>;
-              shipping?: Array<{ name: string }>;
-            };
-            const accessToken = formFields.card?.accessToken;
-
-            // Build billing/shipping payloads from what the user entered,
-            // limited to the fields the schema actually asks for.
-            const pick = (
-              schema: Array<{ name: string }> | undefined,
-              source: Record<string, string> | undefined,
-            ) => {
-              const out: Record<string, string> = {};
-              if (!schema || !source) return out;
-              for (const f of schema) {
-                const v = source[f.name];
-                if (v && v.trim()) out[f.name] = v.trim();
-              }
-              return out;
-            };
-            const billingData = pick(
-              formFields.billing,
-              cfg?.billing as unknown as Record<string, string>,
-            );
-            const shippingSrc = cfg?.shippingSameAsBilling
-              ? cfg?.billing
-              : cfg?.shipping;
-            const shippingData = pick(
-              formFields.shipping,
-              shippingSrc as unknown as Record<string, string>,
-            );
-
-            add("sdk-call", "SDK: submitForm({ intentId, accessToken, billingData, shippingData })", {
-              intentId: intentIdRef.current,
-              hasAccessToken: !!accessToken,
-              billingData,
-              shippingData,
-            });
-            current = await mh.submitForm({
-              intentId: intentIdRef.current ?? "",
-              accessToken: accessToken ?? null,
-              billingData,
-              shippingData,
-            });
-            add("response", "SDK: submitForm resolved", current);
-            continue;
+            // The card form (renderCardAndPay) owns collect()+cardForm.pay on
+            // its pay button. If we land back here inside the loop, stop and let
+            // the form drive it rather than auto-collecting.
+            add("info", "FORM_FIELDS — awaiting card form submission.");
+            return current;
           }
 
           if (current.state === "URL_TO_RENDER") {
@@ -529,14 +486,9 @@ export function useCheckout() {
     [add],
   );
 
-  // Render card fields into the ISOLATED stage, collect, and pay.
-  // Prepare the SDK to accept a direct card payment for this intent.
-  // The correct order (confirmed from the SDK source — cardForm.pay sends only
-  // intentId, no secret) is:
-  //   getMethods({intentId}) → proceedWith({intentId, type:"method", id:"CARD"})
-  // proceedWith selects the method and establishes the intent session on the
-  // backend, so the subsequent cardForm.pay is authenticated. Without it, pay
-  // fails with "Valid intent secret is required."
+  // Render card fields into the ISOLATED stage. The pay button collects the
+  // card data and calls cardForm.pay (repo model). Called when the intent is
+  // in FORM_FIELDS (i.e. CARD was selected at creation or via proceedWith).
 
   // Enrich the payload once, shared by all flows.
   const parsePayload = useCallback(
@@ -646,58 +598,6 @@ export function useCheckout() {
     [add, buildSdk],
   );
 
-  // Prepare a created intent for direct card entry: apply the secret, then
-  // getMethods({intentId}) → proceedWith(CARD) to establish the session.
-  // Card (Flow B): getMethods({intentId}) → proceedWith(CARD) → capture the
-  // FORM_FIELDS accessToken. That token is what submitForm consumes to close
-  // FORM_FIELDS. accessToken is only present if the CARD connection is S2S.
-  const prepareCardIntent = useCallback(
-    async (mh: AnyMoneyHash, intentId: string): Promise<boolean> => {
-      applyIntentSecret(mh);
-      try {
-        add("sdk-call", "SDK: getMethods({ intentId })", { intentId });
-        const res = await mh.getMethods({ intentId });
-        add("response", "SDK: methods for intent", res);
-      } catch (err) {
-        add("error", "getMethods({ intentId }) failed.", err);
-        return false;
-      }
-      try {
-        add("sdk-call", "SDK: proceedWith({ intentId, type:'method', id:'CARD' })", { intentId });
-        const d = await mh.proceedWith({ intentId, type: "method", id: "CARD" });
-        add("response", "SDK: proceedWith(CARD) returned", d);
-
-        const sd = (d.stateDetails ?? {}) as {
-          formFields?: {
-            card?: { accessToken?: string } | null;
-            billing?: Array<{ name: string }> | null;
-            shipping?: Array<{ name: string }> | null;
-          };
-        };
-        cardAccessTokenRef.current = sd.formFields?.card?.accessToken ?? null;
-        billingSchemaRef.current = sd.formFields?.billing ?? null;
-        shippingSchemaRef.current = sd.formFields?.shipping ?? null;
-
-        if (!cardAccessTokenRef.current) {
-          add(
-            "error",
-            "No card accessToken in FORM_FIELDS. The CARD connection is not Server-to-Server (S2S). This is a connection setting in the MoneyHash dashboard, not a code issue — set the CARD connection to S2S and retry.",
-          );
-          return false;
-        }
-        add("info", "Captured FORM_FIELDS card accessToken", {
-          billingFields: (billingSchemaRef.current ?? []).map((f) => f.name),
-          shippingFields: (shippingSchemaRef.current ?? []).map((f) => f.name),
-        });
-        return true;
-      } catch (err) {
-        add("error", "proceedWith(CARD) failed.", err);
-        return false;
-      }
-    },
-    [add, applyIntentSecret],
-  );
-
   const renderCardAndPay = useCallback(
     async (mh: AnyMoneyHash, config: DemoConfig, intentId: string) => {
       const stage = stageRef.current;
@@ -748,7 +648,7 @@ export function useCheckout() {
         if (!target || !target.closest("#mh-pay-btn")) return;
         if (paying) return;
         paying = true;
-        add("info", "Pay button clicked — submitting card form…");
+        add("info", "Pay button clicked — collecting card data…");
         const btn = stage.querySelector("#mh-pay-btn") as HTMLButtonElement | null;
         if (btn) {
           btn.disabled = true;
@@ -756,58 +656,38 @@ export function useCheckout() {
         }
         try {
           const saveCard = config.scenarioId === "save-card";
-          const accessToken = cardAccessTokenRef.current;
-          if (!accessToken) {
-            add("error", "No card accessToken available — cannot submit (CARD connection must be S2S).");
-            if (btn) { btn.disabled = false; btn.textContent = "Pay now"; }
-            paying = false;
-            return;
-          }
-
-          // Re-assert the intent secret right before submitForm so it's in
-          // effect for this call under enforcement.
           applyIntentSecret(mh);
 
-          // Billing/shipping only for the fields the FORM_FIELDS schema asked
-          // for (keyed by Field.name); omit if the schema is empty.
-          const pick = (
-            schema: Array<{ name: string }> | null,
-            source: Record<string, string> | undefined,
-          ) => {
-            const out: Record<string, string> = {};
-            if (!schema || !schema.length || !source) return out;
-            for (const f of schema) {
-              const v = source[f.name];
-              if (v && String(v).trim()) out[f.name] = String(v).trim();
-            }
-            return out;
-          };
-          const billingData = pick(
-            billingSchemaRef.current,
-            config.billing as unknown as Record<string, string>,
-          );
-          const shippingData = pick(
-            shippingSchemaRef.current,
-            (config.shippingSameAsBilling ? config.billing : config.shipping) as unknown as Record<string, string>,
-          );
+          // Billing from the config (SDK ignores fields the schema doesn't ask
+          // for). Repo passes billingData straight into cardForm.pay.
+          const cfgB = (config.billing ?? {}) as unknown as Record<string, string>;
+          const billingData: Record<string, string> = {};
+          for (const [k, v] of Object.entries(cfgB)) {
+            if (v && String(v).trim()) billingData[k] = String(v).trim();
+          }
 
-          const submitArgs: Record<string, unknown> = { intentId, accessToken, saveCard };
-          if (Object.keys(billingData).length) submitArgs.billingData = billingData;
-          if (Object.keys(shippingData).length) submitArgs.shippingData = shippingData;
+          // Repo card flow: collect() → cardForm.pay({ cardData, intentId, billingData }).
+          add("sdk-call", "SDK: cardForm.collect()");
+          const cardData = await mh.cardForm.collect();
+          add("response", "SDK: card data collected", cardData);
 
-          add("sdk-call", "SDK: submitForm({ intentId, accessToken, billingData?, shippingData? })", {
+          add("sdk-call", "SDK: cardForm.pay({ cardData, intentId, billingData?, saveCard })", {
             intentId,
-            hasAccessToken: true,
             billingData,
-            shippingData,
             saveCard,
           });
           const t1 = performance.now();
-          let details = await mh.submitForm(submitArgs);
-          add("response", "SDK: submitForm returned", details, {
+          let details = await mh.cardForm.pay({
+            cardData,
+            intentId,
+            billingData: Object.keys(billingData).length ? billingData : undefined,
+            saveCard,
+          });
+          add("response", "SDK: cardForm.pay resolved", details, {
             durationMs: Math.round(performance.now() - t1),
           });
 
+          // Drive remaining states (URL_TO_RENDER/3DS, PROCESSING, terminal).
           details = await handleState(mh, details);
           const oc = outcomeForState(details.state);
           if (oc) finish(oc);
@@ -824,44 +704,6 @@ export function useCheckout() {
     [add, handleState, applyIntentSecret, finish],
   );
 
-
-  const proceedNonCard = useCallback(
-    async (mh: AnyMoneyHash, method: MethodLike, intentId: string) => {
-      if (method.kind === "express") {
-        add(
-          "info",
-          `${method.title} needs its native payment sheet (e.g. Google Pay / Apple Pay), which isn't wired in this demo yet. Card, wallet, and saved cards work.`,
-        );
-        return;
-      }
-      const typeMap: Record<string, string> = {
-        method: "method",
-        customerBalance: "customerBalance",
-        savedCard: "savedCard",
-      };
-      const type = typeMap[method.kind ?? "method"] ?? "method";
-      try {
-        await resetSelectedMethodSafe(mh, intentId);
-        add("sdk-call", `SDK: proceedWith({ intentId, type:'${type}', id })`, {
-          intentId,
-          type,
-          id: method.id,
-        });
-        const details = await mh.proceedWith({
-          intentId,
-          type,
-          id: method.id,
-        });
-        add("response", "SDK: proceedWith returned", details);
-        const final = await handleState(mh, details);
-        const oc = outcomeForState(final.state);
-        if (oc) finish(oc);
-      } catch (err) {
-        add("error", "proceedWith failed.", err);
-      }
-    },
-    [add, handleState, resetSelectedMethodSafe, finish],
-  );
 
   // ---- Public action 1: Load methods (methods-first only) ----
   const loadMethods = useCallback(
@@ -933,21 +775,32 @@ export function useCheckout() {
         setBusy(false);
         return;
       }
-      const created = await createIntent(config, body, baseURL);
+      // Repo model: create the intent WITH the selected payment_method.
+      const created = await createIntent(config, body, baseURL, selectedMethodId);
       if (!created) {
         setBusy(false);
         return;
       }
+      applyIntentSecret(mh);
 
       const sel = selectedMethodRef.current;
       if (selectedMethodId === "CARD" && (!sel || sel.kind === "method")) {
-        // Flow B: getMethods + proceedWith(CARD) to get the accessToken, then
-        // render fields; submitForm runs on the pay click.
-        const ok = await prepareCardIntent(mh, created.intentId);
-        if (ok) await renderCardAndPay(mh, config, created.intentId);
+        // Intent created with payment_method=CARD → it's in FORM_FIELDS.
+        // Render the card fields; the pay button does collect()+cardForm.pay().
+        await renderCardAndPay(mh, config, created.intentId);
       } else if (sel) {
-        applyIntentSecret(mh);
-        await proceedNonCard(mh, sel, created.intentId);
+        // Non-card: fetch intent details and drive the state machine
+        // (URL_TO_RENDER for redirect methods like Tabby/Tamara, etc.).
+        try {
+          add("sdk-call", "SDK: getIntentDetails(intentId)", { intentId: created.intentId });
+          const details = await mh.getIntentDetails(created.intentId);
+          add("response", "SDK: intent details", details);
+          const final = await handleState(mh, details);
+          const oc = outcomeForState(final.state);
+          if (oc) finish(oc);
+        } catch (err) {
+          add("error", "Could not drive the payment state.", err);
+        }
       } else {
         add("error", "No method selected.");
       }
@@ -958,11 +811,10 @@ export function useCheckout() {
       selectedMethodId,
       parsePayload,
       createIntent,
-      prepareCardIntent,
       applyIntentSecret,
       renderCardAndPay,
-      proceedNonCard,
       handleState,
+      finish,
     ],
   );
 
@@ -1065,21 +917,33 @@ export function useCheckout() {
       const mh = mhRef.current;
       if (!config || !mh) return;
 
-      // Intent-first: intent already created, so proceed straight to pay.
+      // Intent-first: intent already exists → proceedWith to select the method.
       if (config.methodTiming === "intent-first" && intentIdRef.current) {
         setBusy(true);
         setPhase("running");
-        if (methodId === "CARD" && method.kind === "method") {
-          const ok = await prepareCardIntent(mh, intentIdRef.current);
-          if (ok) await renderCardAndPay(mh, config, intentIdRef.current);
-        } else {
-          await proceedNonCard(mh, method, intentIdRef.current);
+        const intentId = intentIdRef.current;
+        applyIntentSecret(mh);
+        try {
+          add("sdk-call", `SDK: proceedWith({ intentId, type:'method', id:'${methodId}' })`, { intentId });
+          const details = await mh.proceedWith({ intentId, type: "method", id: methodId });
+          add("response", "SDK: proceedWith returned", details);
+
+          if (methodId === "CARD" && method.kind === "method") {
+            // Now in FORM_FIELDS → render card fields; button does collect+pay.
+            await renderCardAndPay(mh, config, intentId);
+          } else {
+            const final = await handleState(mh, details);
+            const oc = outcomeForState(final.state);
+            if (oc) finish(oc);
+          }
+        } catch (err) {
+          add("error", "proceedWith failed.", err);
         }
         setBusy(false);
       }
       // Methods-first: just record the selection; user clicks "Pay" next.
     },
-    [add, renderCardAndPay, prepareCardIntent, proceedNonCard, applyIntentSecret, handleState],
+    [add, renderCardAndPay, applyIntentSecret, handleState, finish],
   );
 
   return {
